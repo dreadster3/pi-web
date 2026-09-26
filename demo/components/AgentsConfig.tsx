@@ -1,11 +1,19 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, type CSSProperties } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from "react";
 import { useI18n } from "@/hooks/useI18n";
 import { useIsMobile } from "@/hooks/useIsMobile";
-import type { SubagentProfilesResponse } from "@/lib/api-types";
+import type { SubagentCatalogResponse, SubagentProfilesResponse } from "@/lib/api-types";
 import type { ModelsData } from "@/lib/models-cache";
 import { isSubagentProfileOverridden } from "@/lib/subagent-profile-precedence";
+import type { AgentCatalogAgent, AgentCatalogSource } from "@/lib/pi-subagents-catalog";
 import type { SubagentProfile, SubagentScope, SubagentWritableScope } from "@/lib/subagents";
 import {
   getLastSettingsSelection,
@@ -96,6 +104,23 @@ function profileKey(profile: Pick<SubagentProfile, "scope" | "name">): string {
   return `${profile.scope}:${profile.name}`;
 }
 
+function catalogKey(agent: Pick<AgentCatalogAgent, "source" | "name" | "filePath">): string {
+  return `catalog:${agent.source}:${agent.filePath}:${agent.name}`;
+}
+
+/**
+ * Agent definitions the profile editor cannot edit: the pi-subagents built-ins,
+ * package-provided agents, and `~/.agents` files. They are still shown, because
+ * the runtime's agent list is what the user is looking for.
+ */
+function catalogOnlyAgents(
+  catalog: readonly AgentCatalogAgent[],
+  profiles: readonly SubagentProfile[],
+): AgentCatalogAgent[] {
+  const editablePaths = new Set(profiles.map((profile) => profile.filePath).filter(Boolean));
+  return catalog.filter((agent) => !editablePaths.has(agent.filePath));
+}
+
 function duplicateProfileName(name: string, profiles: readonly SubagentProfile[]): string {
   const existing = new Set(profiles.map((profile) => profile.name.toLowerCase()));
   const base = `${name}-copy`;
@@ -120,6 +145,66 @@ function displayProfilePath(profile: SubagentProfile, cwd: string): string | nul
     return `./${relative}`;
   }
   return shortenPath(profile.filePath);
+}
+
+function sourceLabelKey(source: AgentCatalogSource): string {
+  return `agents.catalog.source.${source}`;
+}
+
+/** The catalog is optional enrichment: any failure or empty body yields no rows. */
+async function readCatalog(response: Response | null): Promise<AgentCatalogAgent[]> {
+  if (!response?.ok) return [];
+  try {
+    const data = await response.json() as Partial<SubagentCatalogResponse> & { error?: string };
+    return data.error ? [] : data.agents ?? [];
+  } catch {
+    return [];
+  }
+}
+
+function CatalogDetailField({ label, value }: { label: string; value: ReactNode }) {
+  return (
+    <Field label={label}>
+      <div className="agents-catalog-value">{value}</div>
+    </Field>
+  );
+}
+
+function CatalogAgentDetail({ agent }: { agent: AgentCatalogAgent }) {
+  const { t } = useI18n();
+  const details: Array<[string, ReactNode]> = [
+    [t("agents.catalog.aliases"), agent.aliases?.join(", ") ?? t("agents.catalog.none")],
+    [t("agents.catalog.model"), agent.model ?? t("agents.inherit")],
+    [t("agents.catalog.thinking"), agent.thinking ?? t("agents.inherit")],
+    [t("agents.catalog.tools"), agent.tools?.length ? agent.tools.join(", ") : t("agents.catalog.toolsInherited")],
+  ];
+  if (agent.excludeTools?.length) details.push([t("agents.catalog.excludeTools"), agent.excludeTools.join(", ")]);
+
+  return (
+    <ConfigDetailStack>
+      <ConfigDetailHeader>
+        <ConfigDetailHeaderInfo>
+          <span className="config-scope-tag">{t(sourceLabelKey(agent.source))}</span>
+          <span title={agent.filePath} className="config-detail-path">{shortenPath(agent.filePath)}</span>
+        </ConfigDetailHeaderInfo>
+        <ConfigDetailActions>
+          {agent.disabled && <span className="agents-catalog-badge">{t("agents.catalog.disabled")}</span>}
+          {agent.overriddenBy && (
+            <span className="agents-overridden-label">
+              {t("agents.catalog.overriddenBy", { source: t(sourceLabelKey(agent.overriddenBy)) })}
+            </span>
+          )}
+          {agent.advertise && <span className="agents-catalog-badge">{t("agents.catalog.advertised")}</span>}
+          {agent.executable === false && <span className="agents-catalog-badge is-warning">{t("agents.catalog.unavailable")}</span>}
+        </ConfigDetailActions>
+      </ConfigDetailHeader>
+      <CatalogDetailField label={t("agents.description")} value={agent.description} />
+      <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", gap: 12 }}>
+        {details.map(([label, value]) => <CatalogDetailField key={label} label={label} value={value} />)}
+      </div>
+      <p className="agents-catalog-note">{t("agents.catalog.readOnly")}</p>
+    </ConfigDetailStack>
+  );
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
@@ -147,10 +232,12 @@ export function AgentsConfig({
   const isMobile = useIsMobile();
   const { t } = useI18n();
   const [profiles, setProfiles] = useState<SubagentProfile[]>([]);
+  const [catalog, setCatalog] = useState<AgentCatalogAgent[]>([]);
   const [modelOptions, setModelOptions] = useState<ModelsData["modelList"]>([]);
   const [modelsLoading, setModelsLoading] = useState(true);
   const [modelsError, setModelsError] = useState<string | null>(null);
   const [selectedKey, setSelectedKey] = useState<string | null>(() => getLastSettingsSelection("agents", cwd));
+  const [selectedCatalogKey, setSelectedCatalogKey] = useState<string | null>(null);
   const [draft, setDraft] = useState<EditableProfile>(EMPTY_PROFILE);
   const [mode, setMode] = useState<EditorMode>("view");
   const [targetScope, setTargetScope] = useState<SubagentWritableScope>("global");
@@ -163,6 +250,11 @@ export function AgentsConfig({
     () => profiles.find((profile) => profileKey(profile) === selectedKey) ?? null,
     [profiles, selectedKey],
   );
+  const uneditable = useMemo(() => catalogOnlyAgents(catalog, profiles), [catalog, profiles]);
+  const selectedCatalog = useMemo(
+    () => uneditable.find((agent) => catalogKey(agent) === selectedCatalogKey) ?? null,
+    [uneditable, selectedCatalogKey],
+  );
   const modelSelectorOptions = useMemo(() => modelOptions.map((model) => ({
     provider: model.provider,
     modelId: model.id,
@@ -173,11 +265,16 @@ export function AgentsConfig({
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch(`/api/subagents/profiles?cwd=${encodeURIComponent(cwd)}`, { cache: "no-store" });
-      const data = await response.json() as Partial<SubagentProfilesResponse> & { error?: string };
-      if (!response.ok || data.error) throw new Error(data.error ?? `HTTP ${response.status}`);
+      const [profilesResponse, catalogResponse] = await Promise.all([
+        fetch(`/api/subagents/profiles?cwd=${encodeURIComponent(cwd)}`, { cache: "no-store" }),
+        // The catalog is a read-only enrichment; a failure leaves the editor alone.
+        fetch(`/api/subagents/catalog?cwd=${encodeURIComponent(cwd)}`, { cache: "no-store" }).catch(() => null),
+      ]);
+      const data = await profilesResponse.json() as Partial<SubagentProfilesResponse> & { error?: string };
+      if (!profilesResponse.ok || data.error) throw new Error(data.error ?? `HTTP ${profilesResponse.status}`);
       const next = data.profiles ?? [];
       setProfiles(next);
+      setCatalog(await readCatalog(catalogResponse));
       const rememberedKey = preferredKey ?? getLastSettingsSelection("agents", cwd);
       const chosen = next.find((profile) => profileKey(profile) === rememberedKey)
         ?? next.find((profile) => profile.scope === "project")
@@ -185,6 +282,7 @@ export function AgentsConfig({
         ?? next[0]
         ?? null;
       setSelectedKey(chosen ? profileKey(chosen) : null);
+      setSelectedCatalogKey(null);
       if (chosen) {
         setDraft(editableProfile(chosen));
         setMode(isWritableScope(chosen.scope) ? "edit" : "view");
@@ -228,9 +326,17 @@ export function AgentsConfig({
 
   const selectProfile = (profile: SubagentProfile) => {
     setSelectedKey(profileKey(profile));
+    setSelectedCatalogKey(null);
     setDraft(editableProfile(profile));
     setMode(isWritableScope(profile.scope) ? "edit" : "view");
     if (isWritableScope(profile.scope)) setTargetScope(profile.scope);
+    setError(null);
+  };
+
+  const selectCatalogAgent = (agent: AgentCatalogAgent) => {
+    setSelectedKey(null);
+    setSelectedCatalogKey(catalogKey(agent));
+    setMode("view");
     setError(null);
   };
 
@@ -239,6 +345,7 @@ export function AgentsConfig({
     let suffix = 2;
     while (profiles.some((profile) => profile.name === name)) name = `custom-agent-${suffix++}`;
     setSelectedKey(null);
+    setSelectedCatalogKey(null);
     setDraft({ ...EMPTY_PROFILE, name, displayName: name });
     setMode("create");
     setTargetScope("global");
@@ -249,6 +356,7 @@ export function AgentsConfig({
     if (!selected) return;
     const name = duplicateProfileName(selected.name, profiles);
     setSelectedKey(null);
+    setSelectedCatalogKey(null);
     setDraft({
       ...editableProfile(selected),
       name,
@@ -357,6 +465,34 @@ export function AgentsConfig({
                   </div>
                 );
               })}
+              {/* Built-in, package, and out-of-editor project/user agents the
+                  editor cannot open, shown so the panel matches what the
+                  runtime can actually dispatch. Project rows whose file the
+                  profiles route already lists stay in the editable groups; this
+                  group holds the project-scope rows it does not read (scan dirs,
+                  project-scope packages). */}
+              {!loading && (["builtin", "package", "user", "project"] as const).map((source) => {
+                const sourceAgents = uneditable.filter((agent) => agent.source === source);
+                if (sourceAgents.length === 0) return null;
+                return (
+                  <div key={source} className="config-sidebar-group">
+                    <ConfigSidebarGroupLabel>{t(sourceLabelKey(source))}</ConfigSidebarGroupLabel>
+                    {sourceAgents.map((agent) => (
+                      <ConfigSidebarItem
+                        key={catalogKey(agent)}
+                        active={selectedCatalogKey === catalogKey(agent)}
+                        onClick={() => selectCatalogAgent(agent)}
+                      >
+                        <ConfigStatusDot active={agent.disabled !== true} />
+                        <ConfigSidebarText className={`is-grow${agent.disabled ? " is-muted" : ""}`}>
+                          {agent.displayName ?? agent.name}
+                        </ConfigSidebarText>
+                        {agent.overriddenBy && <span className="agents-overridden-label">{t("agents.overridden")}</span>}
+                      </ConfigSidebarItem>
+                    ))}
+                  </div>
+                );
+              })}
           </ConfigSidebarList>
           <ConfigListAction
                 active={creating}
@@ -368,8 +504,10 @@ export function AgentsConfig({
 
         <ConfigDetail>
           <ConfigDetailStack className="is-fill">
-              {!selected && !creating ? (
+              {!selected && !selectedCatalog && !creating ? (
                 <ConfigEmptyState>{t("agents.empty")}</ConfigEmptyState>
+              ) : selectedCatalog ? (
+                <CatalogAgentDetail agent={selectedCatalog} />
               ) : (
                 <ConfigDetailStack>
                   <ConfigDetailHeader>

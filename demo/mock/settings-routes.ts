@@ -5,6 +5,7 @@
  * a demo notice.
  */
 import skillsResponse from "./captured/skills.json";
+import subagentCatalogResponse from "./captured/subagent-catalog.json";
 import subagentProfilesResponse from "./captured/subagent-profiles.json";
 import type { MockRequest } from "./http";
 import { delay, error, json } from "./http";
@@ -251,6 +252,10 @@ async function pluginsRoute(request: MockRequest): Promise<Response> {
 }
 
 async function subagentsRoute(request: MockRequest): Promise<Response> {
+  if (request.segments[2] === "catalog") {
+    if (request.method === "GET") return json(subagentCatalogResponse);
+    return error("Method not allowed", 405);
+  }
   if (request.segments[2] !== "profiles") return error("Not found", 404);
   if (request.method === "GET") return json(profilesState);
   const body = await request.json<{ scope?: string; name?: string; profile?: Record<string, unknown> & { name: string } }>();

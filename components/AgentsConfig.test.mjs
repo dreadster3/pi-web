@@ -143,3 +143,35 @@ test("confirms deletion and limits it to writable profiles", () => {
   assert.match(source, /selected && isWritableScope\(selected\.scope\) && mode === "edit"/);
   assert.match(source, /method: "DELETE"/);
 });
+
+test("fetches the pi-subagents catalog alongside profiles and falls back silently", () => {
+  assert.match(source, /fetch\(`\/api\/subagents\/catalog\?cwd=\$\{encodeURIComponent\(cwd\)\}`/);
+  assert.match(source, /await Promise\.all\(\[/);
+  assert.match(source, /async function readCatalog\(response: Response \| null\): Promise<AgentCatalogAgent\[\]>/);
+  assert.match(source, /if \(!response\?\.ok\) return \[\]/);
+  assert.doesNotMatch(source, /setError\([^)]*catalog/i);
+});
+
+test("renders read-only catalog rows only for definitions the editor cannot edit", () => {
+  assert.match(source, /function catalogOnlyAgents\(/);
+  assert.match(source, /const editablePaths = new Set\(profiles\.map\(\(profile\) => profile\.filePath\)\.filter\(Boolean\)\)/);
+  assert.match(source, /\["builtin", "package", "user", "project"\] as const/);
+  assert.match(source, /t\(sourceLabelKey\(source\)\)/);
+  assert.match(source, /<CatalogAgentDetail agent=\{selectedCatalog\} \/>/);
+});
+
+test("shows aliases, model, thinking, and disabled/shadowed state for catalog rows", () => {
+  assert.match(source, /agent\.aliases\?\.join\(", "\) \?\? t\("agents\.catalog\.none"\)/);
+  assert.match(source, /t\("agents\.catalog\.model"\), agent\.model \?\? t\("agents\.inherit"\)/);
+  assert.match(source, /t\("agents\.catalog\.thinking"\), agent\.thinking \?\? t\("agents\.inherit"\)/);
+  assert.match(source, /agent\.disabled && <span className="agents-catalog-badge">\{t\("agents\.catalog\.disabled"\)\}/);
+  assert.match(source, /agent\.overriddenBy && \(/);
+  assert.match(source, /t\("agents\.catalog\.overriddenBy", \{ source: t\(sourceLabelKey\(agent\.overriddenBy\)\) \}\)/);
+});
+
+test("keeps catalog selection separate from the editable profile selection", () => {
+  assert.match(source, /const \[selectedCatalogKey, setSelectedCatalogKey\] = useState<string \| null>\(null\)/);
+  assert.match(source, /function catalogKey\(agent: Pick<AgentCatalogAgent, "source" \| "name" \| "filePath">\): string/);
+  assert.match(source, /setSelectedKey\(null\);\s*setSelectedCatalogKey\(catalogKey\(agent\)\)/);
+  assert.match(source, /setSelectedKey\(profileKey\(profile\)\);\s*setSelectedCatalogKey\(null\)/);
+});

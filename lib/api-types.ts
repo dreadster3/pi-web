@@ -1,8 +1,13 @@
 import type { ResourceDiagnostic } from "@earendil-works/pi-coding-agent";
+import type { AgentCatalogAgent } from "./pi-subagents-catalog";
 import type { SubagentProfile, SubagentRunInfo } from "./subagents";
 
 export interface SubagentProfilesResponse {
   profiles: SubagentProfile[];
+}
+
+export interface SubagentCatalogResponse {
+  agents: AgentCatalogAgent[];
 }
 
 /** Tool-result details persisted by the removed built-in subagent engine. */
