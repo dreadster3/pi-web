@@ -3,8 +3,7 @@
 import { useCallback, useEffect, useMemo, useState, type CSSProperties } from "react";
 import { useI18n } from "@/hooks/useI18n";
 import { useIsMobile } from "@/hooks/useIsMobile";
-import type { SubagentProfilesResponse, SubagentSettingsResponse } from "@/lib/api-types";
-import { sendAgentCommand } from "@/lib/agent-client";
+import type { SubagentProfilesResponse } from "@/lib/api-types";
 import type { ModelsData } from "@/lib/models-cache";
 import { isSubagentProfileOverridden } from "@/lib/subagent-profile-precedence";
 import type { SubagentProfile, SubagentScope, SubagentWritableScope } from "@/lib/subagents";
@@ -110,15 +109,6 @@ function isWritableScope(scope: SubagentScope): scope is SubagentWritableScope {
   return scope === "global" || scope === "project";
 }
 
-/**
- * A built-in has no file to edit, so its fields stay read-only, but its switch is
- * live: the server records the name in `agents/settings.json` instead of writing a
- * copy of the profile to disk.
- */
-function isTogglableScope(scope: SubagentScope): boolean {
-  return isWritableScope(scope) || scope === "builtin";
-}
-
 function shortenPath(path: string): string {
   return path.replace(/^\/(?:Users|home)\/[^/]+/, "~");
 }
@@ -147,15 +137,11 @@ function Toggle({ checked, disabled, label, onChange }: { checked: boolean; disa
 
 export function AgentsConfig({
   cwd,
-  sessionId = null,
   onClose,
-  onReloaded,
   embedded = false,
 }: {
   cwd: string;
-  sessionId?: string | null;
   onClose: () => void;
-  onReloaded?: () => void;
   embedded?: boolean;
 }) {
   const isMobile = useIsMobile();
@@ -171,15 +157,7 @@ export function AgentsConfig({
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [savedOk, setSavedOk] = useState(false);
-  const [toggling, setToggling] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [builtInEnabled, setBuiltInEnabled] = useState(false);
-  const [maxConcurrent, setMaxConcurrent] = useState(10);
-  const [settingsLoading, setSettingsLoading] = useState(true);
-  const [settingsSaving, setSettingsSaving] = useState(false);
-  const [settingsError, setSettingsError] = useState<string | null>(null);
-  const [reloadNeeded, setReloadNeeded] = useState(false);
-  const [reloading, setReloading] = useState(false);
 
   const selected = useMemo(
     () => profiles.find((profile) => profileKey(profile) === selectedKey) ?? null,
@@ -222,32 +200,6 @@ export function AgentsConfig({
   useEffect(() => {
     void loadProfiles();
   }, [loadProfiles]);
-
-  useEffect(() => {
-    const controller = new AbortController();
-    setSettingsLoading(true);
-    setSettingsError(null);
-    void (async () => {
-      try {
-        const response = await fetch("/api/subagents/settings", {
-          cache: "no-store",
-          signal: controller.signal,
-        });
-        const data = await response.json() as Partial<SubagentSettingsResponse> & { error?: string };
-        if (!response.ok || data.error || typeof data.enabled !== "boolean") {
-          throw new Error(data.error ?? `HTTP ${response.status}`);
-        }
-        setBuiltInEnabled(data.enabled);
-        if (typeof data.maxConcurrent === "number") setMaxConcurrent(data.maxConcurrent);
-      } catch (cause) {
-        if (controller.signal.aborted) return;
-        setSettingsError(cause instanceof Error ? cause.message : String(cause));
-      } finally {
-        if (!controller.signal.aborted) setSettingsLoading(false);
-      }
-    })();
-    return () => controller.abort();
-  }, []);
 
   useEffect(() => {
     if (selectedKey) setLastSettingsSelection("agents", selectedKey, cwd);
@@ -352,14 +304,14 @@ export function AgentsConfig({
 
   const editing = mode !== "view";
   const creating = mode === "create";
-  const disabled = !editing || saving || toggling;
+  const disabled = !editing || saving;
   const displayedScope = creating ? targetScope : selected?.scope;
   const displayedPath = creating
     ? targetScope === "global"
       ? `~/.pi/agent/agents/${draft.name || "..."}.md`
       : `./.pi/agents/${draft.name || "..."}.md`
     : selected
-      ? displayProfilePath(selected, cwd) ?? t("agents.builtinPath")
+      ? displayProfilePath(selected, cwd) ?? ""
       : "";
   const fullPath = creating ? displayedPath : selected?.filePath ?? displayedPath;
   const selectedModelAvailable = !draft.model || modelOptions.some((model) => `${model.provider}/${model.id}` === draft.model);
@@ -371,135 +323,18 @@ export function AgentsConfig({
       : { provider: draft.model.slice(0, separator), modelId: draft.model.slice(separator + 1) };
   })();
   const controlStyle = disabled ? { ...inputStyle, ...disabledInputStyle } : inputStyle;
-  const switchDisabled = creating
-    ? disabled
-    : !selected || !isTogglableScope(selected.scope) || saving || toggling;
   const update = <K extends keyof EditableProfile>(key: K, value: EditableProfile[K]) => {
     setDraft((current) => ({ ...current, [key]: value }));
   };
 
-  const toggleEnabled = async (enabled: boolean) => {
-    if (creating) {
-      update("enabled", enabled);
-      return;
-    }
-    if (!selected || !isTogglableScope(selected.scope)) return;
-    setToggling(true);
-    setError(null);
-    try {
-      const response = await fetch("/api/subagents/profiles", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ cwd, scope: selected.scope, name: selected.name, enabled }),
-      });
-      const data = await response.json() as { profile?: SubagentProfile; error?: string };
-      if (!response.ok || data.error || !data.profile) throw new Error(data.error ?? `HTTP ${response.status}`);
-      const saved = data.profile;
-      setProfiles((current) => current.map((profile) => profileKey(profile) === profileKey(saved) ? saved : profile));
-      setDraft((current) => ({ ...current, enabled: saved.enabled }));
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
-    } finally {
-      setToggling(false);
-    }
-  };
-
-  const toggleBuiltInSubagents = async (enabled: boolean) => {
-    setSettingsSaving(true);
-    setSettingsError(null);
-    try {
-      const response = await fetch("/api/subagents/settings", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ enabled }),
-      });
-      const data = await response.json() as Partial<SubagentSettingsResponse> & { error?: string };
-      if (!response.ok || data.error || typeof data.enabled !== "boolean") {
-        throw new Error(data.error ?? `HTTP ${response.status}`);
-      }
-      setBuiltInEnabled(data.enabled);
-      setReloadNeeded(Boolean(sessionId));
-    } catch (cause) {
-      setSettingsError(cause instanceof Error ? cause.message : String(cause));
-    } finally {
-      setSettingsSaving(false);
-    }
-  };
-
-  const updateMaxConcurrent = async (value: number) => {
-    setMaxConcurrent(value);
-    setSettingsError(null);
-    try {
-      const response = await fetch("/api/subagents/settings", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ maxConcurrent: value }),
-      });
-      const data = await response.json() as Partial<SubagentSettingsResponse> & { error?: string };
-      if (!response.ok || data.error || typeof data.maxConcurrent !== "number") throw new Error(data.error ?? `HTTP ${response.status}`);
-      setMaxConcurrent(data.maxConcurrent);
-    } catch (cause) {
-      setSettingsError(cause instanceof Error ? cause.message : String(cause));
-    }
-  };
-
-  const reloadSession = async () => {
-    if (!sessionId) return;
-    setReloading(true);
-    setSettingsError(null);
-    try {
-      await sendAgentCommand(sessionId, { type: "reload" });
-      setReloadNeeded(false);
-      onReloaded?.();
-    } catch (cause) {
-      setSettingsError(cause instanceof Error ? cause.message : String(cause));
-    } finally {
-      setReloading(false);
-    }
-  };
-
   return (
     <ConfigPanelShell embedded={embedded} title={t("common.agents")} subtitle={shortenPath(cwd)} closeLabel={t("agents.close")} onClose={onClose}>
-      <div className="agents-feature-setting">
-        <div className="agents-feature-copy">
-          <strong>{t("agents.builtInTitle")}</strong>
-          <span>{t("agents.builtInDescription")}</span>
-          {reloadNeeded && <span role="status" className="agents-feature-reload-notice">{t("agents.reloadRequired")}</span>}
-        </div>
-        <div className="agents-feature-actions">
-          {reloadNeeded && sessionId && (
-            <ConfigButton size="small" onClick={() => void reloadSession()} disabled={reloading || settingsSaving}>
-              {reloading ? t("agents.reloading") : t("agents.reloadSession")}
-            </ConfigButton>
-          )}
-          <label className="agents-concurrency-control" title={t("agents.maxConcurrentDescription")}>
-            <span>{t("agents.maxConcurrent")}</span>
-            <input
-              aria-label={t("agents.maxConcurrent")}
-              type="number"
-              min={1}
-              max={32}
-              value={maxConcurrent}
-              disabled={settingsLoading || settingsSaving}
-              onChange={(event) => setMaxConcurrent(Number(event.target.value))}
-              onBlur={() => void updateMaxConcurrent(maxConcurrent)}
-            />
-          </label>
-          <ConfigSwitch
-            checked={builtInEnabled}
-            disabled={settingsLoading || reloading}
-            loading={settingsSaving}
-            label={t("agents.builtInTitle")}
-            onChange={(enabled) => void toggleBuiltInSubagents(enabled)}
-          />
-        </div>
-      </div>
       <ConfigSplitView>
         <ConfigSidebar>
           <ConfigSidebarList>
               {loading ? (
                 <div style={{ padding: 10, color: "var(--text-dim)", fontSize: 12 }}>{t("agents.loading")}</div>
-              ) : (["project", "global", "workspace", "builtin"] as const).map((scope) => {
+              ) : (["project", "global", "workspace"] as const).map((scope) => {
                 const scopedProfiles = profiles.filter((profile) => profile.scope === scope);
                 if (scopedProfiles.length === 0) return null;
                 return (
@@ -549,9 +384,9 @@ export function AgentsConfig({
                       </span>
                     </ConfigDetailHeaderInfo>
                     <ConfigDetailActions>
-                      {selected && (mode === "view" || mode === "edit") && <ConfigButton size="small" onClick={beginDuplicate} disabled={saving || toggling}>{t("agents.duplicate")}</ConfigButton>}
-                      {selected && isWritableScope(selected.scope) && mode === "edit" && <ConfigButton variant="danger" size="small" onClick={() => void remove()} disabled={saving || toggling}>{t("agents.delete")}</ConfigButton>}
-                      <ConfigSwitch checked={draft.enabled} disabled={switchDisabled} label={draft.enabled ? t("agents.disable") : t("agents.enable")} onChange={(checked) => void toggleEnabled(checked)} />
+                      {selected && (mode === "view" || mode === "edit") && <ConfigButton size="small" onClick={beginDuplicate} disabled={saving}>{t("agents.duplicate")}</ConfigButton>}
+                      {selected && isWritableScope(selected.scope) && mode === "edit" && <ConfigButton variant="danger" size="small" onClick={() => void remove()} disabled={saving}>{t("agents.delete")}</ConfigButton>}
+                      <ConfigSwitch checked={draft.enabled} disabled={disabled} label={draft.enabled ? t("agents.disable") : t("agents.enable")} onChange={(checked) => update("enabled", checked)} />
                     </ConfigDetailActions>
                   </ConfigDetailHeader>
 
@@ -646,12 +481,12 @@ export function AgentsConfig({
           </ConfigDetailStack>
         </ConfigDetail>
       </ConfigSplitView>
-      <ConfigFooter status={(settingsError || error) && <span role="alert" style={{ color: "#ef4444" }}>{settingsError || error}</span>}>
+      <ConfigFooter status={error && <span role="alert" style={{ color: "#ef4444" }}>{error}</span>}>
         {editing && (
           <ConfigButton
             variant="primary"
             onClick={() => void save()}
-            disabled={saving || savedOk || toggling || !draft.name.trim()}
+            disabled={saving || savedOk || !draft.name.trim()}
             className={savedOk ? "is-success" : undefined}
           >
             {savedOk && (

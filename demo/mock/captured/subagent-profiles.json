@@ -17,7 +17,8 @@
    "inheritContext": false,
    "runInBackground": false,
    "enabled": true,
-   "scope": "builtin"
+   "scope": "global",
+   "filePath": "/Users/demo/.pi/agent/agents/explore.md"
   },
   {
    "name": "general-purpose",
@@ -39,7 +40,8 @@
    "inheritContext": false,
    "runInBackground": false,
    "enabled": true,
-   "scope": "builtin"
+   "scope": "global",
+   "filePath": "/Users/demo/.pi/agent/agents/general-purpose.md"
   },
   {
    "name": "plan",
@@ -58,7 +60,8 @@
    "inheritContext": false,
    "runInBackground": false,
    "enabled": true,
-   "scope": "builtin"
+   "scope": "global",
+   "filePath": "/Users/demo/.pi/agent/agents/plan.md"
   }
  ]
 }

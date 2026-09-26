@@ -1,13 +1,24 @@
 import type { ResourceDiagnostic } from "@earendil-works/pi-coding-agent";
-import type { SubagentProfile } from "./subagents";
+import type { SubagentProfile, SubagentRunInfo } from "./subagents";
 
 export interface SubagentProfilesResponse {
   profiles: SubagentProfile[];
 }
 
-export interface SubagentSettingsResponse {
-  enabled: boolean;
-  maxConcurrent: number;
+/** Tool-result details persisted by the removed built-in subagent engine. */
+export interface SubagentToolDetails {
+  kind: "pi-web-subagent";
+  sessionId: string;
+  profile: string;
+  description: string;
+  status: SubagentRunInfo["status"];
+  runInBackground: boolean;
+  createdAt: string;
+  completedAt?: string;
+  error?: string;
+  worktreePath?: string;
+  worktreeBranch?: string;
+  worktreeCleanupError?: string;
 }
 
 export interface ShellToolSettingsResponse {
