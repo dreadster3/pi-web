@@ -50,3 +50,12 @@ test("catalog route rejects missing and disallowed cwds", async () => {
   response = await GET(new Request(`http://localhost/api/subagents/catalog?cwd=${encodeURIComponent("/nonexistent/pi-web")}`));
   assert.equal(response.status, 400);
 });
+
+test("catalog route returns 403 for an existing but unallowed cwd", async (t) => {
+  const cwd = await mkdtemp(join(tmpdir(), "pi-web-subagent-catalog-unallowed-"));
+  t.after(() => rm(cwd, { recursive: true, force: true }));
+
+  const response = await GET(new Request(`http://localhost/api/subagents/catalog?cwd=${encodeURIComponent(cwd)}`));
+  assert.equal(response.status, 403);
+  assert.deepEqual(await response.json(), { error: "Access denied" });
+});

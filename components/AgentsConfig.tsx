@@ -465,9 +465,13 @@ export function AgentsConfig({
                   </div>
                 );
               })}
-              {/* Built-in and package agents the editor cannot open, shown so the
-                  panel matches what the runtime can actually dispatch. */}
-              {!loading && (["builtin", "package", "user"] as const).map((source) => {
+              {/* Built-in, package, and out-of-editor project/user agents the
+                  editor cannot open, shown so the panel matches what the
+                  runtime can actually dispatch. Project rows whose file the
+                  profiles route already lists stay in the editable groups; this
+                  group holds the project-scope rows it does not read (scan dirs,
+                  project-scope packages). */}
+              {!loading && (["builtin", "package", "user", "project"] as const).map((source) => {
                 const sourceAgents = uneditable.filter((agent) => agent.source === source);
                 if (sourceAgents.length === 0) return null;
                 return (

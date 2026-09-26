@@ -103,7 +103,7 @@ export const zhTWLocale: LocalePlugin = {
     "agents.catalog.toolsInherited": "繼承全部工具",
     "agents.catalog.none": "無",
     "agents.catalog.disabled": "已停用",
-    "agents.catalog.advertised": "已宣傳",
+    "agents.catalog.advertised": "對外提供",
     "agents.catalog.unavailable": "找不到 CLI",
     "agents.catalog.overriddenBy": "被{source}覆寫",
     "agents.catalog.readOnly": "由已安裝的 pi-subagents 套件或 pi 設定定義；如需修改請編輯對應檔案。",

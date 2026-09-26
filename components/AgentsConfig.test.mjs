@@ -155,7 +155,7 @@ test("fetches the pi-subagents catalog alongside profiles and falls back silentl
 test("renders read-only catalog rows only for definitions the editor cannot edit", () => {
   assert.match(source, /function catalogOnlyAgents\(/);
   assert.match(source, /const editablePaths = new Set\(profiles\.map\(\(profile\) => profile\.filePath\)\.filter\(Boolean\)\)/);
-  assert.match(source, /\["builtin", "package", "user"\] as const/);
+  assert.match(source, /\["builtin", "package", "user", "project"\] as const/);
   assert.match(source, /t\(sourceLabelKey\(source\)\)/);
   assert.match(source, /<CatalogAgentDetail agent=\{selectedCatalog\} \/>/);
 });

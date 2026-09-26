@@ -103,7 +103,7 @@ export const zhCNLocale: LocalePlugin = {
     "agents.catalog.toolsInherited": "继承全部工具",
     "agents.catalog.none": "无",
     "agents.catalog.disabled": "已停用",
-    "agents.catalog.advertised": "已宣传",
+    "agents.catalog.advertised": "对外提供",
     "agents.catalog.unavailable": "未找到 CLI",
     "agents.catalog.overriddenBy": "被{source}覆盖",
     "agents.catalog.readOnly": "由已安装的 pi-subagents 包或 pi 设置定义；如需修改请编辑对应文件。",
