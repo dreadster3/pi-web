@@ -27,6 +27,9 @@ import { parseFrontmatter } from "./frontmatter";
  *   line parser, so a malformed block scalar hides a row the runtime keeps.
  * - Relative `agentScanDirs` entries resolve against their settings file's
  *   directory; pi-subagents resolves them against the process cwd.
+ * - The runtime throws on invalid override values (e.g. `description: ""`) and
+ *   on the removed `fallbackModels` field; the catalog degrades to a partial
+ *   catalog instead (documented never-throw stance).
  */
 
 export type AgentCatalogSource = "builtin" | "package" | "user" | "project";
@@ -68,8 +71,44 @@ interface CatalogSettings {
   defaultProvider?: string;
   defaultThinking?: string;
   disableBuiltins?: boolean;
+  disableThinking?: boolean;
   agentScanDirs: string[];
 }
+
+/**
+ * The keys `parseBuiltinOverrideEntry` recognizes. An override entry holding
+ * none of them is dropped by the runtime's `Object.keys(override).length > 0`
+ * guard, so it neither overrides nor shields a builtin; the catalog mirrors
+ * that set instead of accepting any non-empty object.
+ */
+const RECOGNIZED_OVERRIDE_FIELDS = new Set([
+  "description",
+  "output",
+  "outputMode",
+  "model",
+  "fast",
+  "thinking",
+  "systemPromptMode",
+  "inheritProjectContext",
+  "inheritGlobalContext",
+  "inheritSkills",
+  "defaultContext",
+  "acceptanceRole",
+  "disabled",
+  "toolBudget",
+  "systemPrompt",
+  "machine",
+  "defaultReads",
+  "defaultProvider",
+  "skills",
+  "tools",
+  "excludeTools",
+  "allowNestedSubagents",
+  "allowedAgents",
+  "extensions",
+  "subagentOnlyExtensions",
+  "mutationTools",
+]);
 
 function emptySettings(): CatalogSettings {
   return { overrides: {}, agentScanDirs: [] };
@@ -131,9 +170,11 @@ function readSubagentSettings(filePath: string): CatalogSettings {
   const overrides: Record<string, Record<string, unknown>> = {};
   if (isRecord(subagents.agentOverrides)) {
     for (const [name, value] of Object.entries(subagents.agentOverrides)) {
-      // The runtime's parser drops an entry with no recognized field, so an
-      // empty object neither overrides nor shields a builtin from bulk disable.
-      if (isRecord(value) && Object.keys(value).length > 0) overrides[name] = value;
+      // The runtime's parser drops an entry with no recognized field, so such an
+      // object neither overrides nor shields a builtin from bulk disable.
+      if (isRecord(value) && Object.keys(value).some((key) => RECOGNIZED_OVERRIDE_FIELDS.has(key))) {
+        overrides[name] = value;
+      }
     }
   }
   return {
@@ -142,6 +183,7 @@ function readSubagentSettings(filePath: string): CatalogSettings {
     ...(stringValue(subagents.defaultProvider) ? { defaultProvider: stringValue(subagents.defaultProvider) } : {}),
     ...(stringValue(subagents.defaultThinking) ? { defaultThinking: stringValue(subagents.defaultThinking) } : {}),
     ...(typeof subagents.disableBuiltins === "boolean" ? { disableBuiltins: subagents.disableBuiltins } : {}),
+    ...(typeof subagents.disableThinking === "boolean" ? { disableThinking: subagents.disableThinking } : {}),
     agentScanDirs: Array.isArray(subagents.agentScanDirs)
       ? subagents.agentScanDirs.filter((dir): dir is string => typeof dir === "string" && dir.trim().length > 0)
       : [],
@@ -454,7 +496,12 @@ function configuredPiSubagentsAgentDirs(cwd: string): string[] {
       const packageRoot = pkg.installedPath ?? resolvePackageSource(pkg.source, pkg.scope === "project" ? join(cwd, CONFIG_DIR_NAME) : userAgentDir);
       if (!packageRoot) continue;
       const manifest = readJsonObject(join(packageRoot, "package.json"));
-      if (stringValue(manifest?.name) === PI_SUBAGENTS_PACKAGE) dirs.push(join(packageRoot, "agents"));
+      // The bundled built-ins are one fixed package: keep only the first
+      // configured copy so a user+project install cannot duplicate every row.
+      if (stringValue(manifest?.name) === PI_SUBAGENTS_PACKAGE) {
+        dirs.push(join(packageRoot, "agents"));
+        break;
+      }
     }
     return dirs;
   } catch {
@@ -657,10 +704,27 @@ function applyDefaults(row: AgentCatalogAgent, settings: CatalogSettings): Agent
 }
 
 /**
+ * `clearBuiltinThinking`: `subagents.disableThinking` strips a builtin's
+ * thinking value unless the override that applied at the builtin's own scale
+ * set one. A project-level value (true or false) suppresses the user value.
+ */
+function clearBuiltinThinking(
+  row: AgentCatalogAgent,
+  disableThinking: boolean,
+  hasExplicitThinkingOverride: boolean,
+): AgentCatalogAgent {
+  if (!disableThinking || hasExplicitThinkingOverride || row.thinking === undefined) return row;
+  const next: AgentCatalogAgent = { ...row };
+  delete next.thinking;
+  return next;
+}
+
+/**
  * The runtime's `applyBuiltinOverrides` ladder: a project override shields a
  * builtin from the project-wide bulk disable, a user override shields it from
- * the user-wide one, and a project-level `disableBuiltins` value (true or
- * false) suppresses the user bulk.
+ * the user-wide one, a project-level `disableBuiltins` value (true or false)
+ * suppresses the user bulk, and `disableThinking` strips the builtin's thinking
+ * unless the applied override set one.
  */
 function applyBuiltinLadder(
   row: AgentCatalogAgent,
@@ -671,13 +735,21 @@ function applyBuiltinLadder(
   const next = applyDefaults(row, defaults);
   const projectOverride = projectSettings.overrides[row.name];
   const userOverride = userSettings.overrides[row.name];
-  if (projectOverride) return { ...applyOverride(next, projectOverride) };
-  if (projectSettings.disableBuiltins === true) return { ...next, disabled: true };
-  if (userOverride) return { ...applyOverride(next, userOverride) };
-  if (projectSettings.disableBuiltins === undefined && userSettings.disableBuiltins === true) {
-    return { ...next, disabled: true };
+  const projectThinkingConfigured = projectSettings.disableThinking !== undefined;
+  const disableThinking = projectThinkingConfigured ? projectSettings.disableThinking === true : userSettings.disableThinking === true;
+  if (projectOverride) {
+    return clearBuiltinThinking(applyOverride(next, projectOverride), disableThinking, projectOverride.thinking !== undefined);
   }
-  return next;
+  if (projectSettings.disableBuiltins === true) {
+    return clearBuiltinThinking({ ...next, disabled: true }, disableThinking, false);
+  }
+  if (userOverride) {
+    return clearBuiltinThinking(applyOverride(next, userOverride), disableThinking, !projectThinkingConfigured && userOverride.thinking !== undefined);
+  }
+  if (projectSettings.disableBuiltins === undefined && userSettings.disableBuiltins === true) {
+    return clearBuiltinThinking({ ...next, disabled: true }, disableThinking, false);
+  }
+  return clearBuiltinThinking(next, disableThinking, false);
 }
 
 /**
