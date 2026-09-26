@@ -114,18 +114,30 @@ function parseNode(value: unknown): PiSubagentSnapshotNode | null {
   };
 }
 
-/** Parse one `subagent-async` widget line, tolerating unrelated or malformed lines. */
+/**
+ * Parse the first complete `PI_SUBAGENT_ASYNC_JSON:`-prefixed line. The widget
+ * may carry several snapshots (one per publish); taking everything after the
+ * first prefix would concatenate them into invalid JSON.
+ */
 export function parseAsyncSnapshotWidgetLine(text: string): PiSubagentSnapshot | null {
-  const prefixIndex = text.indexOf(PI_SUBAGENTS_ASYNC_WIDGET_PREFIX);
-  if (prefixIndex === -1) return null;
-  const payload = text.slice(prefixIndex + PI_SUBAGENTS_ASYNC_WIDGET_PREFIX.length).trim();
-  if (!payload) return null;
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(payload);
-  } catch {
-    return null;
+  for (const line of text.split("\n")) {
+    const prefixIndex = line.indexOf(PI_SUBAGENTS_ASYNC_WIDGET_PREFIX);
+    if (prefixIndex === -1) continue;
+    const payload = line.slice(prefixIndex + PI_SUBAGENTS_ASYNC_WIDGET_PREFIX.length).trim();
+    if (!payload) continue;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(payload);
+    } catch {
+      continue;
+    }
+    const snapshot = parseAsyncSnapshot(parsed);
+    if (snapshot) return snapshot;
   }
+  return null;
+}
+
+function parseAsyncSnapshot(parsed: unknown): PiSubagentSnapshot | null {
   if (!isRecord(parsed)) return null;
   if (parsed.kind !== PI_SUBAGENTS_ASYNC_SNAPSHOT_KIND) return null;
   if (parsed.version !== PI_SUBAGENTS_ASYNC_SNAPSHOT_VERSION) return null;
@@ -148,4 +160,15 @@ export function flattenPiSubagentSnapshot(snapshot: PiSubagentSnapshot): PiSubag
   };
   for (const run of snapshot.runs) walk(run);
   return flat;
+}
+
+/** `queued` and `running` are the only states whose progress still changes. */
+export function isPiSubagentRunTerminal(state: PiSubagentRunState): boolean {
+  return state !== "queued" && state !== "running";
+}
+
+/** True while any run or nested child in the snapshot is non-terminal. */
+export function hasLivePiSubagentRun(snapshot: PiSubagentSnapshot | null | undefined): boolean {
+  if (!snapshot) return false;
+  return flattenPiSubagentSnapshot(snapshot).some((node) => !isPiSubagentRunTerminal(node.state));
 }

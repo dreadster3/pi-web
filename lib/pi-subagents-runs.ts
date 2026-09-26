@@ -13,6 +13,10 @@ import {
 
 export interface PiSubagentRunStep {
   agent: string;
+  /** Workflow lane key; the snapshot node id for a materialized step. */
+  workflowKey?: string;
+  /** Nested child run id; the snapshot node id for a materialized chain step. */
+  runId?: string;
   sessionName?: string;
   description?: string;
   sessionFile?: string;
@@ -41,8 +45,6 @@ export interface PiSubagentRun {
   currentToolStartedAt?: number;
   turnCount?: number;
   toolCount?: number;
-  tokens?: number;
-  cost?: number;
   steps: PiSubagentRunStep[];
 }
 
@@ -113,6 +115,8 @@ function parseStep(value: unknown): PiSubagentRunStep | null {
   if (!isRecord(value)) return null;
   return {
     agent: asString(value.agent) ?? "subagent",
+    ...(asString(value.workflowKey) ? { workflowKey: asString(value.workflowKey) } : {}),
+    ...(asString(value.runId) ? { runId: asString(value.runId) } : {}),
     ...(asString(value.sessionName) ? { sessionName: asString(value.sessionName) } : {}),
     ...(asString(value.description) ? { description: asString(value.description) } : {}),
     ...(asString(value.sessionFile) ? { sessionFile: asString(value.sessionFile) } : {}),
@@ -154,8 +158,6 @@ function parseRunStatus(path: string, runId: string): PiSubagentRun | null {
     ...(asNumber(parsed.currentToolStartedAt) !== undefined ? { currentToolStartedAt: asNumber(parsed.currentToolStartedAt) } : {}),
     ...(asNumber(parsed.turnCount) !== undefined ? { turnCount: asNumber(parsed.turnCount) } : {}),
     ...(asNumber(parsed.toolCount) !== undefined ? { toolCount: asNumber(parsed.toolCount) } : {}),
-    ...(numericTotal(parsed.totalTokens) !== undefined ? { tokens: numericTotal(parsed.totalTokens) } : {}),
-    ...(numericTotal(parsed.totalCost) !== undefined ? { cost: numericTotal(parsed.totalCost) } : {}),
     steps,
   };
 }

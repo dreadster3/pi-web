@@ -17,13 +17,13 @@ import { ChatMinimap, useMessageRefs } from "./ChatMinimap";
 import { ExtensionStatusBar } from "./ExtensionStatusBar";
 import { AnsiText } from "./AnsiText";
 import { useI18n } from "@/hooks/useI18n";
-import { useAgentSession, type AgentPhase, type NoticeItem } from "@/hooks/useAgentSession";
+import { useAgentSession, type AgentPhase, type AgentStateResponse, type NoticeItem } from "@/hooks/useAgentSession";
 import { useDragDrop } from "@/hooks/useDragDrop";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useScrollbarVisibility } from "@/hooks/useScrollbarVisibility";
 import type { SessionStatsInfo } from "@/lib/pi-types";
 import type { AppUpdateResponse } from "@/lib/api-types";
-import { parseAsyncSnapshotWidgetLine, flattenPiSubagentSnapshot, type PiSubagentSnapshotNode } from "@/lib/pi-subagents-snapshot";
+import { parseAsyncSnapshotWidgetLine, flattenPiSubagentSnapshot, hasLivePiSubagentRun, type PiSubagentSnapshotNode } from "@/lib/pi-subagents-snapshot";
 import type { ToolEntry } from "@/lib/tool-presets";
 import { findChatScrollAnchor, type ChatScrollPosition } from "@/lib/chat-scroll-position";
 import {
@@ -34,6 +34,8 @@ import {
   restoreScrollTop,
   VISIBLE_PAGE_SIZE,
 } from "@/lib/chat-lazy-load";
+
+const SUBAGENT_RUN_POLL_MS = 4_000;
 
 interface Props {
   session: SessionInfo | null;
@@ -285,6 +287,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
     isCompacting, compactError, compactResult, displayModel: displayModelValue, modelSwitching, sessionStats,
     slashCommands, slashCommandsLoading, queuedMessages,
     notices, extensionDialog, extensionCustomUi, extensionStatuses, extensionWidgets, respondToExtensionUi, sendExtensionCustomInput, setNoticePaused,
+    setExtensionWidgets,
     isAutoModelSelection,
     isAutoThinkingSelection,
     agentPhase,
@@ -717,7 +720,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
     return snapshot ? flattenPiSubagentSnapshot(snapshot) : [];
   }, [extensionWidgets]);
   const subagentRunsKey = subagentRuns
-    .map((run) => `${run.id}|${run.state}|${run.activity?.currentTool ?? ""}|${run.activity?.toolCount ?? ""}|${run.activity?.turnCount ?? ""}`)
+    .map((run) => `${run.id}|${run.state}|${run.label}|${run.startedAt ?? ""}|${run.endedAt ?? ""}|${run.activity?.currentTool ?? ""}|${run.activity?.toolCount ?? ""}|${run.activity?.turnCount ?? ""}`)
     .join(";");
   const subagentRunsRef = useRef(subagentRuns);
   subagentRunsRef.current = subagentRuns;
@@ -725,6 +728,49 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
     onSubagentRunsChange?.(subagentRunsRef.current);
   }, [subagentRunsKey, onSubagentRunsChange]);
   useEffect(() => () => { onSubagentRunsChange?.([]); }, [onSubagentRunsChange]);
+
+  // A detached pi-subagents run keeps publishing to the `subagent-async` widget
+  // long after the parent prompt settled, and the hook only refreshes widgets on
+  // mount, SSE settlement, or the busy-only reconcile poll. While the parsed
+  // snapshot still has a non-terminal run, re-read the wrapper state on a short
+  // timer and stop as soon as the widget reports everything terminal. The widget
+  // is the only live source here: a child session carries no widget of its own,
+  // so polling on its persisted relation status would never refresh anything.
+  const hasLiveSubagentRun = useMemo(() => {
+    const widget = extensionWidgets.find((candidate) => candidate.key === "subagent-async");
+    const snapshot = widget ? parseAsyncSnapshotWidgetLine(widget.lines.join("\n")) : null;
+    return hasLivePiSubagentRun(snapshot);
+  }, [extensionWidgets]);
+  useEffect(() => {
+    if (!hasLiveSubagentRun || agentRunning) return;
+    let interval: ReturnType<typeof setInterval> | undefined;
+    const poll = () => {
+      const sid = sessionIdRef.current ?? session?.id;
+      if (!sid) return;
+      void fetch(`/api/agent/${encodeURIComponent(sid)}`)
+        .then((response) => response.json() as Promise<{ state?: AgentStateResponse }>)
+        .then((data) => {
+          if (sessionIdRef.current !== sid && session?.id !== sid) return;
+          if (data.state?.extensionWidgets !== undefined) {
+            setExtensionWidgets(data.state.extensionWidgets ?? []);
+            return;
+          }
+          if (data.state === undefined && interval) {
+            // The wrapper is gone, so the widget can never refresh again; stop
+            // rather than poll a dead session every few seconds forever.
+            clearInterval(interval);
+            interval = undefined;
+          }
+        })
+        .catch(() => {});
+    };
+    interval = setInterval(poll, SUBAGENT_RUN_POLL_MS);
+    document.addEventListener("visibilitychange", poll);
+    return () => {
+      if (interval) clearInterval(interval);
+      document.removeEventListener("visibilitychange", poll);
+    };
+  }, [hasLiveSubagentRun, agentRunning, session?.id, setExtensionWidgets, sessionIdRef]);
 
   // Push context usage up to AppShell as well.
   const ctxKey = contextUsage

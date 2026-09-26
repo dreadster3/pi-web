@@ -32,7 +32,8 @@ export interface MockSession {
   parentSessionId?: string;
   /** Overrides the default flat `sessionFilePath()` layout when set. */
   path?: string;
-  entries: SessionEntry[];  leafId: string | null;
+  entries: SessionEntry[];
+  leafId: string | null;
   /** Created by /api/agent/new and not yet written to "disk". */
   transient: boolean;
   live: LiveState | null;

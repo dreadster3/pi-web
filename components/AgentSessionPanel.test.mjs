@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 const source = await readFile(new URL("./AgentSessionPanel.tsx", import.meta.url), "utf8");
+const progressSource = await readFile(new URL("../lib/pi-subagents-progress.ts", import.meta.url), "utf8");
 
 test("keeps the main session first and makes every agent session selectable", () => {
   const mainRow = source.indexOf("session={rootSession}");
@@ -40,12 +41,13 @@ test("surfaces per-run progress from the subagent-async snapshot while falling b
   assert.match(source, /liveRuns\?: PiSubagentSnapshotNode\[\]/);
   assert.match(source, /liveRuns = \[\]/);
   assert.match(source, /progress\?\.status \?\? relation\?\.status \?\? "completed"/);
-  // Run id joins by the explicit relation.runId, then by path/name substring.
-  assert.match(source, /session\.relation\.runId/);
-  assert.match(source, /session\.path\.includes\(run\.id\)/);
+  // The join is the shared, unit-tested helper; it matches stepRunId first so a
+  // multi-step chain maps one run to many rows instead of last-wins.
+  assert.match(source, /buildRunProgress\(subagents, liveRuns\)/);
+  assert.match(source, /from "@\/lib\/pi-subagents-progress"/);
   // Progress text reuses the existing rows/styles rather than a new panel.
-  assert.match(source, /agentSwitcher\.run\.tool/);
-  assert.match(source, /agentSwitcher\.run\.turns/);
-  assert.match(source, /agentSwitcher\.run\.tools/);
-  assert.match(source, /formatElapsed\(progress\.startedAt, progress\.endedAt \?\? Date\.now\(\)\)/);
+  assert.match(source, /formatRunProgress\(progress, t\)/);
+  assert.match(progressSource, /agentSwitcher\.run\.tool/);
+  assert.match(progressSource, /agentSwitcher\.run\.turns/);
+  assert.match(progressSource, /agentSwitcher\.run\.tools/);
 });

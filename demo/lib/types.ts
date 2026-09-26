@@ -378,6 +378,9 @@ export interface SessionInfo {
         engine?: "pi-web" | "pi-subagents";
         /** pi-subagents async run id, when an async `status.json` matched this transcript. */
         runId?: string;
+        /** Snapshot node id of this child's step within that run; one run backs
+         *  every child of a chain, so this is what disambiguates the rows. */
+        stepRunId?: string;
       };
   /** Main repo root shared by all worktrees of this cwd (cwd itself for non-git dirs).
    *  Always set by the server; optional because the client builds transient

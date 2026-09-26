@@ -203,6 +203,7 @@ export const extendPiSubagentSession: SessionScript = {
     status: "running",
     engine: "pi-subagents",
     runId: "019d7b54-9b2a-7e79-c3d4-8c9d0e1f2a18",
+    stepRunId: "step:0",
   },
   steps: [
     { kind: "model", provider: "openai-codex", modelId: "gpt-5.6-luna" },

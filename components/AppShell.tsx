@@ -148,15 +148,12 @@ export function AppShell() {
   const hasSubagentSessions = Boolean(activeSessionFamily?.subagents.length);
   const [runningSessionIds, setRunningSessionIds] = useState<Set<string>>(() => new Set());
   // Live pi-subagents runs from the active session's `subagent-async` widget.
+  // ChatWindow only calls this when its own progress key changes, so no extra
+  // equality guard is needed here — one would have to cover label, activity,
+  // and timestamps or it would freeze the progress line mid-run.
   const [subagentRuns, setSubagentRuns] = useState<PiSubagentSnapshotNode[]>([]);
   const handleSubagentRunsChange = useCallback((runs: PiSubagentSnapshotNode[]) => {
-    setSubagentRuns((previous) => {
-      if (previous.length === runs.length
-        && previous.every((run, index) => run.id === runs[index]?.id && run.state === runs[index]?.state)) {
-        return previous;
-      }
-      return runs;
-    });
+    setSubagentRuns(runs);
   }, []);
   const handleRunningSessionIdsChange = useCallback((ids: Set<string>) => {
     setRunningSessionIds((previous) => {
