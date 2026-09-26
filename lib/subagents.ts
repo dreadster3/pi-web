@@ -63,6 +63,12 @@ export interface SubagentProfile {
   toolTimeoutMs?: number;
   maxSubagentDepth?: number;
   allowNestedSubagents?: boolean;
+  /**
+   * `allowedAgents` is presence-sensitive: an omitted key is unrestricted, while
+   * a present empty value denies every descendant launch. This UI marker records
+   * the empty-list case so a save writes `''` instead of dropping the key.
+   */
+  allowedAgentsDenyAll?: boolean;
   allowedAgents?: string[];
   advertise?: boolean;
   output?: string;
@@ -147,6 +153,8 @@ const DEFAULT_TOOLS = ["read", "bash", "edit", "write", "grep", "find", "ls"];
 const BUILTIN_TOOLS = new Set(DEFAULT_TOOLS);
 const SUBAGENT_CONTROL_TOOLS = new Set<string>(SUBAGENT_CONTROL_TOOL_NAMES);
 const THINKING_LEVELS = new Set<ThinkingLevel>(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
+/** pi-subagents rejects a `toolTimeoutMs` above the 32-bit signed integer ceiling. */
+const TOOL_TIMEOUT_MAX_MS = 2_147_483_647;
 const SYSTEM_PROMPT_MODES = ["replace", "append"] as const;
 const DEFAULT_CONTEXTS = ["fresh", "fork"] as const;
 const ACCEPTANCE_ROLES = ["read-only", "writer"] as const;
@@ -163,6 +171,9 @@ const MANAGED_FRONTMATTER_KEYS = new Set([
   "excludeTools",
   "extensions",
   "subagentOnlyExtensions",
+  // `skill` is pi-subagents' legacy alias for `skills`; the web UI normalizes it
+  // into `skills` and drops it so a stale alias cannot shadow the edited list.
+  "skill",
   "skills",
   "skillPath",
   "model",
@@ -323,10 +334,12 @@ function assertBoolean(value: unknown, label: string): boolean | undefined {
   throw new Error(`${label} must be a boolean`);
 }
 
-function assertPositiveInt(value: unknown, label: string): number | undefined {
+function assertPositiveInt(value: unknown, label: string, max?: number): number | undefined {
   if (value === undefined || value === null || value === "") return undefined;
   const parsed = typeof value === "number" ? value : Number(value);
-  if (!Number.isInteger(parsed) || parsed <= 0) throw new Error(`${label} must be a positive integer`);
+  if (!Number.isInteger(parsed) || parsed <= 0 || (max !== undefined && parsed > max)) {
+    throw new Error(`${label} must be a positive integer${max !== undefined ? ` no larger than ${max}` : ""}`);
+  }
   return parsed;
 }
 
@@ -365,7 +378,11 @@ function parseProfileFile(filePath: string, scope: SubagentScope): SubagentProfi
     if (!data) {
       return { name, description: name, systemPrompt: rest.trim(), toolsInherited: true, scope, filePath };
     }
-    const thinkingValue = stringValue(data.thinking) as ThinkingLevel | undefined;
+    // pi-subagents' line parser maps a bare `thinking: false` to the legacy
+    // "off" sentinel; keep it explicit so a save does not revert it to inherit.
+    const thinkingValue = data.thinking === false || data.thinking === "false"
+      ? "off"
+      : stringValue(data.thinking) as ThinkingLevel | undefined;
 
     // Legacy migration: the new key wins, and the old editor's spelling fills in
     // for a file written before this schema existed.
@@ -373,6 +390,9 @@ function parseProfileFile(filePath: string, scope: SubagentScope): SubagentProfi
     const excludeTools = optionalList(data.excludeTools !== undefined ? data.excludeTools : data.disallowed_tools);
 
     let skills = optionalList(data.skills);
+    // pi-subagents reads `skill || skills`; normalize the legacy alias into the
+    // single `skills` source so an edited list is never shadowed by a stale alias.
+    if (skills === undefined) skills = optionalList(data.skill);
     let inheritSkillsFlag = booleanValue(data.inheritSkills) ?? booleanValue(data.load_skills);
     // The old editor wrote `skills: true` before the alias became an allowlist.
     if (typeof data.skills === "boolean") {
@@ -390,6 +410,9 @@ function parseProfileFile(filePath: string, scope: SubagentScope): SubagentProfi
     const acceptanceRole = enumValue(data.acceptanceRole, ACCEPTANCE_ROLES);
     const timeoutMs = positiveIntValue(data.timeoutMs);
     const toolTimeoutMs = positiveIntValue(data.toolTimeoutMs);
+    // A present-but-empty `allowedAgents` denies every descendant launch; an
+    // omitted key is unrestricted. The marker distinguishes the two after a read.
+    const parsedAllowedAgents = data.allowedAgents !== undefined ? (frontmatterList(data.allowedAgents) ?? []) : undefined;
     const maxSubagentDepth = (() => {
       const raw = data.maxSubagentDepth;
       if (raw === undefined || raw === null || raw === "") return undefined;
@@ -421,7 +444,9 @@ function parseProfileFile(filePath: string, scope: SubagentScope): SubagentProfi
       ...(toolTimeoutMs ? { toolTimeoutMs } : {}),
       ...(maxSubagentDepth !== undefined ? { maxSubagentDepth } : {}),
       ...(booleanValue(data.allowNestedSubagents) !== undefined ? { allowNestedSubagents: booleanValue(data.allowNestedSubagents) } : {}),
-      ...(optionalList(data.allowedAgents) ? { allowedAgents: optionalList(data.allowedAgents) } : {}),
+      ...(parsedAllowedAgents !== undefined
+        ? { allowedAgents: parsedAllowedAgents, allowedAgentsDenyAll: parsedAllowedAgents.length === 0 }
+        : {}),
       ...(booleanValue(data.advertise) !== undefined ? { advertise: booleanValue(data.advertise) } : {}),
       ...(stringValue(data.output) ? { output: stringValue(data.output) } : {}),
       ...(optionalList(data.defaultReads) ? { defaultReads: optionalList(data.defaultReads) } : {}),
@@ -528,7 +553,7 @@ export function saveSubagentProfile(
   const advertise = assertBoolean(profile.advertise, "advertise");
   const defaultProgress = assertBoolean(profile.defaultProgress, "defaultProgress");
   const timeoutMs = assertPositiveInt(profile.timeoutMs, "timeoutMs");
-  const toolTimeoutMs = assertPositiveInt(profile.toolTimeoutMs, "toolTimeoutMs");
+  const toolTimeoutMs = assertPositiveInt(profile.toolTimeoutMs, "toolTimeoutMs", TOOL_TIMEOUT_MAX_MS);
   const maxSubagentDepth = profile.maxSubagentDepth;
   if (maxSubagentDepth !== undefined && (!Number.isInteger(maxSubagentDepth) || maxSubagentDepth < 0)) {
     throw new Error("maxSubagentDepth must be a non-negative integer");
@@ -577,8 +602,11 @@ export function saveSubagentProfile(
   if (toolTimeoutMs) managed.toolTimeoutMs = toolTimeoutMs;
   if (maxSubagentDepth !== undefined) managed.maxSubagentDepth = maxSubagentDepth;
   if (allowNestedSubagents !== undefined) managed.allowNestedSubagents = allowNestedSubagents;
+  // Presence-preserving deny-all: the marker writes the bare empty value that
+  // pi-subagents reads as "no descendant launches" instead of dropping the key.
   const allowedAgents = optionalList(profile.allowedAgents);
-  if (allowedAgents) managed.allowedAgents = joinList(allowedAgents);
+  if (profile.allowedAgentsDenyAll === true) managed.allowedAgents = "";
+  else if (allowedAgents) managed.allowedAgents = joinList(allowedAgents);
   if (advertise !== undefined) managed.advertise = advertise;
   if (profile.output?.trim()) managed.output = profile.output.trim();
   const defaultReads = optionalList(profile.defaultReads);
@@ -619,7 +647,11 @@ export function saveSubagentProfile(
     ...(toolTimeoutMs ? { toolTimeoutMs } : {}),
     ...(maxSubagentDepth !== undefined ? { maxSubagentDepth } : {}),
     ...(allowNestedSubagents !== undefined ? { allowNestedSubagents } : {}),
-    ...(allowedAgents ? { allowedAgents } : {}),
+    ...(profile.allowedAgentsDenyAll === true
+      ? { allowedAgents: [], allowedAgentsDenyAll: true }
+      : allowedAgents
+        ? { allowedAgents, allowedAgentsDenyAll: false }
+        : { allowedAgents: undefined, allowedAgentsDenyAll: undefined }),
     ...(advertise !== undefined ? { advertise } : {}),
     ...(profile.output?.trim() ? { output: profile.output.trim() } : {}),
     ...(defaultReads ? { defaultReads } : {}),

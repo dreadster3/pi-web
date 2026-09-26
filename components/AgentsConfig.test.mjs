@@ -215,3 +215,33 @@ test("keeps catalog selection separate from the editable profile selection", () 
   assert.match(source, /setSelectedKey\(null\);\s*setSelectedCatalogKey\(catalogKey\(agent\)\)/);
   assert.match(source, /setSelectedKey\(profileKey\(profile\)\);\s*setSelectedCatalogKey\(null\)/);
 });
+
+test("offers a deny-all descendants affordance for allowedAgents", () => {
+  assert.match(source, /t\("agents\.denyAllDescendants"\)/);
+  assert.match(source, /checked=\{draft\.allowedAgentsDenyAll === true\}/);
+  assert.match(source, /allowedAgentsDenyAll: checked, \.\.\.\(checked \? \{ allowedAgents: \[\] \} : \{\}\)/);
+  assert.match(source, /disabled=\{disabled \|\| draft\.allowedAgentsDenyAll === true\}/);
+  assert.match(source, /t\("agents\.allowedAgentsHelp"\)/);
+});
+
+test("rejects commas in raw tool entries with a validation note", () => {
+  assert.match(source, /const appendRaw = \(list: "tools" \| "excludeTools", value: string\) =>/);
+  assert.match(source, /if \(entry\.includes\(","\)\) \{/);
+  assert.match(source, /setEntryError\(t\("agents\.rawEntryComma"\)\)/);
+  assert.match(source, /\{rawEntryError && <span role="alert"/);
+  assert.match(source, /\{rawExcludeEntryError && <span role="alert"/);
+});
+
+test("resets the raw entry inputs whenever the edited profile changes", () => {
+  assert.match(source, /const resetRawEntries = \(\) => \{/);
+  assert.match(source, /const selectProfile = \(profile: SubagentProfile\) => \{\s*resetRawEntries\(\);/);
+  assert.match(source, /const selectCatalogAgent = \(agent: AgentCatalogAgent\) => \{\s*resetRawEntries\(\);/);
+  assert.match(source, /const beginCreate = \(\) => \{\s*resetRawEntries\(\);/);
+  assert.match(source, /const beginDuplicate = \(\) => \{\s*if \(!selected\) return;\s*resetRawEntries\(\);/);
+  assert.match(source, /setRawEntry\(""\);\s*setRawExcludeEntry\(""\);/);
+});
+
+test("renders the allowNestedSubagents toggle with a translated label", () => {
+  assert.match(source, /label=\{t\("agents\.allowNestedSubagents"\)\}/);
+  assert.match(source, /checked=\{draft\.allowNestedSubagents === true\}/);
+});

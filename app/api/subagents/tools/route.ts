@@ -15,7 +15,20 @@ interface CachedTools {
 
 /** Keep the editor snappy without re-loading extensions on every open. */
 const TOOLS_CACHE_TTL_MS = 60_000;
+/** Bound the cache: Map preserves insertion order, so the oldest cwd is first. */
+const TOOLS_CACHE_MAX_ENTRIES = 32;
 const toolsCache = new Map<string, CachedTools>();
+
+function cacheTools(cwd: string, tools: SubagentToolInfo[]): void {
+  // Re-insert on refresh so the newest cwd moves to the end of the eviction order.
+  toolsCache.delete(cwd);
+  toolsCache.set(cwd, { expiresAt: Date.now() + TOOLS_CACHE_TTL_MS, tools });
+  while (toolsCache.size > TOOLS_CACHE_MAX_ENTRIES) {
+    const oldest = toolsCache.keys().next().value;
+    if (oldest === undefined) break;
+    toolsCache.delete(oldest);
+  }
+}
 
 async function validateCwd(cwd: unknown): Promise<string> {
   if (typeof cwd !== "string" || !cwd || !existsSync(cwd)) throw new Error("Valid cwd required");
@@ -66,7 +79,7 @@ export async function GET(req: Request) {
       return NextResponse.json({ tools: cached.tools });
     }
     const tools = await listTools(cwd);
-    toolsCache.set(cwd, { expiresAt: Date.now() + TOOLS_CACHE_TTL_MS, tools });
+    cacheTools(cwd, tools);
     return NextResponse.json({ tools });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

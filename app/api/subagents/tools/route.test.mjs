@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { after } from "node:test";
@@ -70,4 +70,22 @@ test("tools route returns 403 for an existing but unallowed cwd", async (t) => {
   const response = await GET(new Request(`http://localhost/api/subagents/tools?cwd=${encodeURIComponent(cwd)}`));
   assert.equal(response.status, 403);
   assert.deepEqual(await response.json(), { error: "Access denied" });
+});
+
+test("tools route caches per cwd and evicts beyond the entry bound", async (t) => {
+  const cwd = await mkdtemp(join(tmpdir(), "pi-web-subagent-tools-bounded-"));
+  allowFileRoot(cwd);
+  t.after(() => rm(cwd, { recursive: true, force: true }));
+
+  const routeSource = await readFile(new URL("./route.ts", import.meta.url), "utf8");
+  assert.match(routeSource, /TOOLS_CACHE_MAX_ENTRIES = 32/);
+  assert.match(routeSource, /toolsCache\.delete\(cwd\)/);
+  assert.match(routeSource, /toolsCache\.size > TOOLS_CACHE_MAX_ENTRIES/);
+
+  // A second request for the same cwd is served from the cache, so no new entry is added.
+  const first = await GET(new Request(`http://localhost/api/subagents/tools?cwd=${encodeURIComponent(cwd)}`));
+  const second = await GET(new Request(`http://localhost/api/subagents/tools?cwd=${encodeURIComponent(cwd)}`));
+  assert.equal(first.status, 200);
+  assert.equal(second.status, 200);
+  assert.deepEqual(await first.json(), await second.json());
 });

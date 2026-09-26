@@ -336,6 +336,8 @@ export function AgentsConfig({
   const [error, setError] = useState<string | null>(null);
   const [rawEntry, setRawEntry] = useState("");
   const [rawExcludeEntry, setRawExcludeEntry] = useState("");
+  const [rawEntryError, setRawEntryError] = useState<string | null>(null);
+  const [rawExcludeEntryError, setRawExcludeEntryError] = useState<string | null>(null);
 
   const selected = useMemo(
     () => profiles.find((profile) => profileKey(profile) === selectedKey) ?? null,
@@ -421,7 +423,16 @@ export function AgentsConfig({
     return () => controller.abort();
   }, [cwd]);
 
+  /** The raw-entry inputs are local text; reset them whenever the edited profile changes. */
+  const resetRawEntries = () => {
+    setRawEntry("");
+    setRawExcludeEntry("");
+    setRawEntryError(null);
+    setRawExcludeEntryError(null);
+  };
+
   const selectProfile = (profile: SubagentProfile) => {
+    resetRawEntries();
     setSelectedKey(profileKey(profile));
     setSelectedCatalogKey(null);
     setDraft(editableProfile(profile));
@@ -431,6 +442,7 @@ export function AgentsConfig({
   };
 
   const selectCatalogAgent = (agent: AgentCatalogAgent) => {
+    resetRawEntries();
     setSelectedKey(null);
     setSelectedCatalogKey(catalogKey(agent));
     setMode("view");
@@ -438,6 +450,7 @@ export function AgentsConfig({
   };
 
   const beginCreate = () => {
+    resetRawEntries();
     let name = "custom-agent";
     let suffix = 2;
     while (profiles.some((profile) => profile.name === name)) name = `custom-agent-${suffix++}`;
@@ -451,6 +464,7 @@ export function AgentsConfig({
 
   const beginDuplicate = () => {
     if (!selected) return;
+    resetRawEntries();
     const name = duplicateProfileName(selected.name, profiles);
     setSelectedKey(null);
     setSelectedCatalogKey(null);
@@ -549,7 +563,15 @@ export function AgentsConfig({
   };
   const appendRaw = (list: "tools" | "excludeTools", value: string) => {
     const entry = value.trim();
+    const setEntryError = list === "tools" ? setRawEntryError : setRawExcludeEntryError;
     if (!entry) return;
+    // A comma would be re-split into separate entries on the next read, so reject it
+    // here rather than silently writing one value where the file format means many.
+    if (entry.includes(",")) {
+      setEntryError(t("agents.rawEntryComma"));
+      return;
+    }
+    setEntryError(null);
     setDraft((current) => {
       const values = current[list] ?? [];
       return values.includes(entry) ? current : { ...current, [list]: [...values, entry] };
@@ -719,9 +741,10 @@ export function AgentsConfig({
                         <RawEntries values={rawTools} disabled={disabled} removeLabel={t("agents.removeEntry")} onRemove={(value) => removeRaw("tools", value)} />
                         <Field label={t("agents.rawEntryInput")}>
                           <div style={{ display: "flex", gap: 6 }}>
-                            <input aria-label={t("agents.rawEntryInput")} value={rawEntry} disabled={disabled} placeholder={t("agents.rawEntryPlaceholder")} onChange={(event) => setRawEntry(event.target.value)} style={controlStyle} />
-                            <ConfigButton size="small" disabled={disabled} onClick={() => { appendRaw("tools", rawEntry); setRawEntry(""); }}>+</ConfigButton>
+                            <input aria-label={t("agents.rawEntryInput")} value={rawEntry} disabled={disabled} placeholder={t("agents.rawEntryPlaceholder")} onChange={(event) => { setRawEntry(event.target.value); if (rawEntryError) setRawEntryError(null); }} style={controlStyle} />
+                            <ConfigButton size="small" disabled={disabled} onClick={() => { appendRaw("tools", rawEntry); if (!rawEntry.includes(",")) setRawEntry(""); }}>+</ConfigButton>
                           </div>
+                          {rawEntryError && <span role="alert" style={{ color: "#ef4444", fontSize: 10 }}>{rawEntryError}</span>}
                         </Field>
                       </>
                     )}
@@ -735,9 +758,10 @@ export function AgentsConfig({
                     <RawEntries values={rawExcludeTools} disabled={disabled} removeLabel={t("agents.removeEntry")} onRemove={(value) => removeRaw("excludeTools", value)} />
                     <Field label={t("agents.rawEntryInput")}>
                       <div style={{ display: "flex", gap: 6 }}>
-                        <input aria-label={`${t("agents.excludeTools")} ${t("agents.rawEntryInput")}`} value={rawExcludeEntry} disabled={disabled} placeholder={t("agents.rawEntryPlaceholder")} onChange={(event) => setRawExcludeEntry(event.target.value)} style={controlStyle} />
-                        <ConfigButton size="small" disabled={disabled} onClick={() => { appendRaw("excludeTools", rawExcludeEntry); setRawExcludeEntry(""); }}>+</ConfigButton>
+                        <input aria-label={`${t("agents.excludeTools")} ${t("agents.rawEntryInput")}`} value={rawExcludeEntry} disabled={disabled} placeholder={t("agents.rawEntryPlaceholder")} onChange={(event) => { setRawExcludeEntry(event.target.value); if (rawExcludeEntryError) setRawExcludeEntryError(null); }} style={controlStyle} />
+                        <ConfigButton size="small" disabled={disabled} onClick={() => { appendRaw("excludeTools", rawExcludeEntry); if (!rawExcludeEntry.includes(",")) setRawExcludeEntry(""); }}>+</ConfigButton>
                       </div>
+                      {rawExcludeEntryError && <span role="alert" style={{ color: "#ef4444", fontSize: 10 }}>{rawExcludeEntryError}</span>}
                     </Field>
                   </Section>
 
@@ -842,7 +866,7 @@ export function AgentsConfig({
                         <input aria-label={t("agents.timeoutMs")} type="number" min={1} value={draft.timeoutMs ?? ""} disabled={disabled} onChange={(event) => update("timeoutMs", event.target.value ? Number(event.target.value) : undefined)} style={controlStyle} />
                       </Field>
                       <Field label={t("agents.toolTimeoutMs")}>
-                        <input aria-label={t("agents.toolTimeoutMs")} type="number" min={1} value={draft.toolTimeoutMs ?? ""} disabled={disabled} onChange={(event) => update("toolTimeoutMs", event.target.value ? Number(event.target.value) : undefined)} style={controlStyle} />
+                        <input aria-label={t("agents.toolTimeoutMs")} type="number" min={1} max={2147483647} value={draft.toolTimeoutMs ?? ""} disabled={disabled} onChange={(event) => update("toolTimeoutMs", event.target.value ? Number(event.target.value) : undefined)} style={controlStyle} />
                       </Field>
                     </div>
                     <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "minmax(0, 1fr) minmax(0, 2fr)", gap: 12 }}>
@@ -850,13 +874,22 @@ export function AgentsConfig({
                         <input aria-label={t("agents.maxSubagentDepth")} type="number" min={0} value={draft.maxSubagentDepth ?? ""} disabled={disabled} onChange={(event) => update("maxSubagentDepth", event.target.value ? Number(event.target.value) : undefined)} style={controlStyle} />
                       </Field>
                       <Field label={t("agents.allowedAgents")}>
-                        <ListInput
-                          key={`${formKey}:allowedAgents`}
-                          initial={draft.allowedAgents ?? []}
-                          disabled={disabled}
-                          ariaLabel={t("agents.allowedAgents")}
-                          onChange={(values) => update("allowedAgents", values)}
-                        />
+                        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                          <Toggle
+                            label={t("agents.denyAllDescendants")}
+                            disabled={disabled}
+                            checked={draft.allowedAgentsDenyAll === true}
+                            onChange={(checked) => setDraft((current) => ({ ...current, allowedAgentsDenyAll: checked, ...(checked ? { allowedAgents: [] } : {}) }))}
+                          />
+                          <ListInput
+                            key={`${formKey}:allowedAgents:${draft.allowedAgentsDenyAll === true ? "deny" : "list"}`}
+                            initial={draft.allowedAgents ?? []}
+                            disabled={disabled || draft.allowedAgentsDenyAll === true}
+                            ariaLabel={t("agents.allowedAgents")}
+                            onChange={(values) => update("allowedAgents", values)}
+                          />
+                          <span className="agents-catalog-note">{t("agents.allowedAgentsHelp")}</span>
+                        </div>
                       </Field>
                     </div>
                   </Section>
