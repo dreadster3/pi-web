@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 const source = await readFile(new URL("./AgentSessionPanel.tsx", import.meta.url), "utf8");
+const progressSource = await readFile(new URL("../lib/pi-subagents-progress.ts", import.meta.url), "utf8");
 
 test("keeps the main session first and makes every agent session selectable", () => {
   const mainRow = source.indexOf("session={rootSession}");
@@ -28,8 +29,25 @@ test("renders as a compact left-positioned dropdown without a centered inner wid
 });
 
 test("shows persisted completion states while live running state takes precedence", () => {
-  assert.match(source, /const status: SubagentSessionStatus = running \? "running" : relation\?\.status \?\? "completed"/);
+  assert.match(source, /const status: SubagentSessionStatus = running \|\| progress\?\.status === "running"/);
   assert.match(source, /t\(`agentSwitcher\.status\.\$\{status\}`\)/);
   assert.match(source, /status === "failed"/);
   assert.match(source, /status === "aborted" \|\| status === "interrupted"/);
+});
+
+test("surfaces per-run progress from the subagent-async snapshot while falling back to relation status", () => {
+  // Live runs come in as an optional prop; without one the row keeps using
+  // relation.status, so older sessions and the demo still render.
+  assert.match(source, /liveRuns\?: PiSubagentSnapshotNode\[\]/);
+  assert.match(source, /liveRuns = \[\]/);
+  assert.match(source, /progress\?\.status \?\? relation\?\.status \?\? "completed"/);
+  // The join is the shared, unit-tested helper; it matches stepRunId first so a
+  // multi-step chain maps one run to many rows instead of last-wins.
+  assert.match(source, /buildRunProgress\(subagents, liveRuns\)/);
+  assert.match(source, /from "@\/lib\/pi-subagents-progress"/);
+  // Progress text reuses the existing rows/styles rather than a new panel.
+  assert.match(source, /formatRunProgress\(progress, t\)/);
+  assert.match(progressSource, /agentSwitcher\.run\.tool/);
+  assert.match(progressSource, /agentSwitcher\.run\.turns/);
+  assert.match(progressSource, /agentSwitcher\.run\.tools/);
 });
