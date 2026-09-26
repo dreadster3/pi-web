@@ -251,33 +251,19 @@ async function pluginsRoute(request: MockRequest): Promise<Response> {
 }
 
 async function subagentsRoute(request: MockRequest): Promise<Response> {
-  const sub = request.segments[2];
-  if (sub === "settings") {
-    if (request.method === "PUT") {
-      const body = await request.json<{ enabled?: boolean; maxConcurrent?: number }>();
-      if (typeof body.enabled === "boolean") settings.subagentsEnabled = body.enabled;
-      if (typeof body.maxConcurrent === "number") settings.subagentMaxConcurrent = body.maxConcurrent;
-    }
-    return json({ enabled: settings.subagentsEnabled, maxConcurrent: settings.subagentMaxConcurrent });
+  if (request.segments[2] !== "profiles") return error("Not found", 404);
+  if (request.method === "GET") return json(profilesState);
+  const body = await request.json<{ scope?: string; name?: string; profile?: Record<string, unknown> & { name: string } }>();
+  if (request.method === "PUT" && body.profile) {
+    const incoming = body.profile;
+    const replaced = profilesState.profiles.find((candidate) => candidate.name === incoming.name && candidate.scope === (body.scope ?? "global"));
+    const saved = { ...body.profile, scope: body.scope ?? "global", enabled: body.profile.enabled ?? true, ...(replaced?.filePath ? { filePath: replaced.filePath } : {}) } as (typeof profilesState.profiles)[number];
+    profilesState.profiles = [...profilesState.profiles.filter((candidate) => !(candidate.name === saved.name && candidate.scope === saved.scope)), saved];
+    return json({ profile: saved });
   }
-  if (sub === "profiles") {
-    if (request.method === "GET") return json(profilesState);
-    const body = await request.json<{ scope?: string; name?: string; enabled?: boolean; profile?: Record<string, unknown> & { name: string } }>();
-    if (request.method === "PATCH") {
-      const profile = profilesState.profiles.find((candidate) => candidate.name === body.name && candidate.scope === body.scope);
-      if (!profile) return error("Agent profile not found", 404);
-      profile.enabled = Boolean(body.enabled);
-      return json({ profile });
-    }
-    if (request.method === "PUT" && body.profile) {
-      const saved = { ...body.profile, scope: body.scope ?? "global", enabled: body.profile.enabled ?? true } as (typeof profilesState.profiles)[number];
-      profilesState.profiles = [...profilesState.profiles.filter((candidate) => !(candidate.name === saved.name && candidate.scope === saved.scope)), saved];
-      return json({ profile: saved });
-    }
-    if (request.method === "DELETE") {
-      profilesState.profiles = profilesState.profiles.filter((candidate) => !(candidate.name === body.name && candidate.scope === body.scope));
-      return json({ ok: true });
-    }
+  if (request.method === "DELETE") {
+    profilesState.profiles = profilesState.profiles.filter((candidate) => !(candidate.name === body.name && candidate.scope === body.scope));
+    return json({ ok: true });
   }
   return error("Not found", 404);
 }

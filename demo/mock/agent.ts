@@ -28,7 +28,6 @@ import {
 import { readSessionToolSelectionFromEntries } from "./sessions/tool-selection";
 import { composeReply, type ReplyPlan } from "./replies";
 import { runShellCommand } from "./shell";
-import { settings } from "./settings-state";
 
 // ---------------------------------------------------------------------------
 // Event streams
@@ -138,14 +137,11 @@ export async function agentState(session: MockSession) {
 
 export function toolsFor(session: MockSession) {
   const pinned = readSessionToolSelectionFromEntries(session.entries);
-  const defaults = new Set(["read", "bash", "edit", "write", "Agent", "get_subagent_result", "steer_subagent"]);
+  const defaults = new Set(["read", "bash", "edit", "write", "subagent"]);
   return toolsCatalog
-    .filter((tool) => settings.subagentsEnabled || !["Agent", "get_subagent_result", "steer_subagent"].includes(tool.name))
     .map((tool) => ({
       ...tool,
-      active: pinned
-        ? pinned.includes(tool.name) || (pinned.length > 0 && ["Agent", "get_subagent_result", "steer_subagent"].includes(tool.name))
-        : defaults.has(tool.name),
+      active: pinned ? pinned.includes(tool.name) : defaults.has(tool.name),
     }));
 }
 

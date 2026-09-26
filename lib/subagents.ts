@@ -6,8 +6,6 @@ import { basename, dirname, join, resolve } from "path";
 import { parseFrontmatter } from "./frontmatter";
 import { writePrivateFileAtomicSync } from "./atomic-file";
 import { isExistingPathWithinRoots } from "./path-security";
-import { disabledBuiltInSubagents } from "./subagent-settings";
-import { PRESET_READ_ONLY } from "./tool-presets";
 import type { SessionEntry, SubagentSessionStatus } from "./types";
 
 export const SUBAGENT_META_TYPE = "pi-web:subagent";
@@ -16,6 +14,7 @@ export const SUBAGENT_RESULT_TYPE = "pi-web:subagent-result";
 export const SUBAGENT_CONTROL_TOOL_NAMES = ["Agent", "get_subagent_result", "steer_subagent"] as const;
 
 export type SubagentStatus = SubagentSessionStatus;
+/** `"builtin"` is no longer produced by any source; kept so the precedence map and profileDirectories' Exclude stay well-typed. */
 export type SubagentScope = "builtin" | "global" | "workspace" | "project";
 export type SubagentWritableScope = Extract<SubagentScope, "global" | "project">;
 
@@ -42,6 +41,7 @@ export interface SubagentProfile {
   filePath?: string;
 }
 
+/** persisted by the removed built-in subagent engine; kept for legacy readers */
 export interface SubagentMetadata {
   version: 1;
   parentSessionId: string;
@@ -57,6 +57,7 @@ export interface SubagentMetadata {
   worktreeBranch?: string;
 }
 
+/** persisted by the removed built-in subagent engine; kept for legacy readers */
 export interface SubagentResourceSnapshot {
   version: 1;
   appendSystemPrompt: string[];
@@ -74,6 +75,7 @@ export interface SubagentSessionResources {
   exactSystemPrompt?: string;
 }
 
+/** persisted by the removed built-in subagent engine; kept for legacy readers */
 export interface SubagentResultMetadata {
   version: 1;
   status: Exclude<SubagentStatus, "starting" | "running" | "queued" | "interrupted">;
@@ -83,6 +85,7 @@ export interface SubagentResultMetadata {
   worktreeCleanupError?: string;
 }
 
+/** persisted by the removed built-in subagent engine; kept for legacy readers */
 export interface SubagentStatusMetadata {
   version: 1;
   status: Extract<SubagentStatus, "queued" | "running">;
@@ -145,51 +148,6 @@ const FRONTMATTER_OPEN_RE = /^(?:\uFEFF)?---[ \t]*(?:\r\n|\n|\r)/;
  * carried through by `unmanagedFrontmatter` and only rewritten once we own them.
  */
 const OWNED_ALIAS_VALUES = new Set(["none", "all", "true", "false"]);
-
-const BUILTIN_PROFILES: SubagentProfile[] = [
-  {
-    name: "general-purpose",
-    displayName: "General purpose",
-    description: "Handle a focused implementation or investigation task",
-    systemPrompt: "Work autonomously on the delegated task. Keep the final answer concise and include important files, decisions, and remaining risks.",
-    tools: DEFAULT_TOOLS,
-    loadSkills: false,
-    loadExtensions: false,
-    promptMode: "append",
-    inheritContext: false,
-    runInBackground: false,
-    enabled: true,
-    scope: "builtin",
-  },
-  {
-    name: "explore",
-    displayName: "Explore",
-    description: "Quickly inspect a codebase without modifying it",
-    systemPrompt: "Explore the codebase to answer the delegated question. Do not modify files. Report concrete findings with file paths and relevant symbols.",
-    tools: [...PRESET_READ_ONLY],
-    loadSkills: false,
-    loadExtensions: false,
-    promptMode: "append",
-    inheritContext: false,
-    runInBackground: false,
-    enabled: true,
-    scope: "builtin",
-  },
-  {
-    name: "plan",
-    displayName: "Plan",
-    description: "Design an implementation plan without modifying files",
-    systemPrompt: "Produce an implementation-ready plan for the delegated task. Inspect the repository as needed, do not modify files, and call out dependencies, risks, and verification steps.",
-    tools: [...PRESET_READ_ONLY],
-    loadSkills: false,
-    loadExtensions: false,
-    promptMode: "append",
-    inheritContext: false,
-    runInBackground: false,
-    enabled: true,
-    scope: "builtin",
-  },
-];
 
 function stringValue(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
@@ -337,41 +295,13 @@ function profileDirectories(cwd: string): Array<[string, Exclude<SubagentScope, 
   ];
 }
 
-/**
- * A built-in has no file, so `enabled: false` cannot be written next to it the way
- * it is for a profile on disk. Its off state is a name in `agents/settings.json`
- * instead of a copied-out override file, which would otherwise freeze the built-in
- * prompt at the version it was copied from.
- */
-function builtInProfiles(): SubagentProfile[] {
-  const disabled = disabledBuiltInSubagents();
-  return BUILTIN_PROFILES.map((profile) => ({
-    ...profile,
-    tools: [...profile.tools],
-    enabled: !disabled.has(profile.name.toLowerCase()),
-  }));
-}
-
 /** Every configured source, including profiles shadowed by a higher-precedence scope. */
 export function listSubagentProfileSources(cwd: string): SubagentProfile[] {
-  const profiles = builtInProfiles();
+  const profiles: SubagentProfile[] = [];
   for (const [dir, scope] of profileDirectories(cwd)) {
     profiles.push(...readProfileDirectory(dir, scope, cwd));
   }
   return profiles.sort((a, b) => a.displayName.localeCompare(b.displayName));
-}
-
-export function listSubagentProfiles(cwd: string): SubagentProfile[] {
-  // A same-name file replaces the built-in outright, its own `enabled` included.
-  const byName = new Map(builtInProfiles().map((profile) => [profile.name.toLowerCase(), profile]));
-  for (const [dir, scope] of profileDirectories(cwd)) {
-    for (const profile of readProfileDirectory(dir, scope, cwd)) byName.set(profile.name.toLowerCase(), profile);
-  }
-  return [...byName.values()].sort((a, b) => a.displayName.localeCompare(b.displayName));
-}
-
-export function resolveSubagentProfile(cwd: string, name: string): SubagentProfile | undefined {
-  return listSubagentProfiles(cwd).find((profile) => profile.name.toLowerCase() === name.trim().toLowerCase() && profile.enabled);
 }
 
 function assertProfileName(name: string): string {
@@ -545,39 +475,6 @@ export function readSubagentSessionResources(
     };
   }
   return null;
-}
-
-export function withSubagentExtensionTools(
-  profileTools: readonly string[],
-  extensionToolNames: Iterable<string>,
-): string[] {
-  return [...new Set([
-    ...profileTools,
-    ...[...extensionToolNames].filter((name) => !SUBAGENT_CONTROL_TOOLS.has(name)),
-  ])];
-}
-
-export function selectSubagentExtensionTools(
-  extensions: Iterable<{ path: string; sourceInfo?: { source?: string }; tools: Map<string, unknown> }>,
-  selectors: readonly string[],
-): string[] {
-  const wanted = selectors.map((selector) => selector.slice(4).toLowerCase());
-  return [...extensions].flatMap((extension) => {
-    const pathName = extension.path.replaceAll("\\", "/").split("/").at(-2) ?? extension.path;
-    const sourceName = (extension.sourceInfo?.source ?? "").replace(/^npm:/, "");
-    const extensionNames = new Set([pathName.toLowerCase(), sourceName.toLowerCase()]);
-    const selected = wanted.some((selector) => {
-      if (selector === "*") return true;
-      const [extensionName, toolName] = selector.split("/", 2);
-      return extensionNames.has(extensionName) && (!toolName || extension.tools.has(toolName));
-    });
-    if (!selected) return [];
-    return [...extension.tools.keys()].filter((toolName) => wanted.some((selector) => {
-      if (selector === "*" || selector.endsWith("/*")) return selector === "*" || extensionNames.has(selector.slice(0, -2));
-      const [extensionName, selectedTool] = selector.split("/", 2);
-      return extensionNames.has(extensionName) && (!selectedTool || selectedTool === toolName);
-    }));
-  });
 }
 
 export function readSubagentRun(entries: readonly SessionEntry[], sessionId: string, sessionPath: string): SubagentRunInfo | null {

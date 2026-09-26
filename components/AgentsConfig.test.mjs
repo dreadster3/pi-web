@@ -9,7 +9,7 @@ const modelSelectorSource = await readFile(new URL("./ModelSelector.tsx", import
 
 test("keeps same-name profiles selectable by scope and groups writable sources first", () => {
   assert.match(source, /return `\$\{profile\.scope\}:\$\{profile\.name\}`/);
-  assert.match(source, /\["project", "global", "workspace", "builtin"\] as const/);
+  assert.match(source, /\["project", "global", "workspace"\] as const/);
   assert.match(source, /profile\.scope === scope/);
 });
 
@@ -19,16 +19,12 @@ test("uses the shared enabled status treatment", () => {
   assert.match(cssSource, /\.config-sidebar-text\.is-muted \{[\s\S]*?color: var\(--text-dim\)/);
 });
 
-test("offers a persisted built-in sub-agent switch with explicit session reload", () => {
-  assert.match(source, /fetch\("\/api\/subagents\/settings"/);
-  assert.match(source, /JSON\.stringify\(\{ enabled \}\)/);
-  assert.match(source, /<ConfigSwitch[\s\S]*?checked=\{builtInEnabled\}[\s\S]*?t\("agents\.builtInTitle"\)/);
-  assert.match(source, /sendAgentCommand\(sessionId, \{ type: "reload" \}\)/);
-  assert.match(source, /reloadNeeded && sessionId/);
-  assert.match(source, /className="agents-concurrency-control"[\s\S]*?t\("agents\.maxConcurrent"\)/);
-  assert.equal((source.match(/className="agents-feature-setting"/g) ?? []).length, 1);
-  assert.match(cssSource, /\.agents-feature-setting \{[\s\S]*?border-bottom: 1px solid var\(--border\)/);
-  assert.match(cssSource, /\.agents-concurrency-control \{[\s\S]*?white-space: nowrap;/);
+test("is a pure agent-profile editor without the built-in engine settings", () => {
+  assert.doesNotMatch(source, /\/api\/subagents\/settings/);
+  assert.doesNotMatch(source, /builtInEnabled|maxConcurrent|disabledBuiltIns/);
+  assert.doesNotMatch(source, /isTogglableScope|agents\.builtInTitle|agents\.builtinPath|scope === "builtin"/);
+  assert.doesNotMatch(source, /agents-feature-setting|agents-concurrency-control/);
+  assert.doesNotMatch(source, /sendAgentCommand/);
 });
 
 test("marks profiles shadowed by a higher-precedence source", () => {
@@ -63,25 +59,19 @@ test("shows a Skills-style path row with the same switch in editable and readonl
   assert.match(source, /function displayProfilePath\(profile: SubagentProfile, cwd: string\)/);
   assert.match(source, /profile\.scope === "project" \|\| profile\.scope === "workspace"/);
   assert.match(source, /`~\/\.pi\/agent\/agents\/\$\{draft\.name \|\| "\.\.\."\}\.md`/);
-  assert.match(source, /<ConfigSwitch checked=\{draft\.enabled\} disabled=\{switchDisabled\}/);
+  assert.match(source, /<ConfigSwitch checked=\{draft\.enabled\} disabled=\{disabled\}/);
   assert.doesNotMatch(source, /agents-readonly-status/);
   assert.doesNotMatch(source, /<Toggle label=\{t\("agents\.enabled"\)\}/);
 });
 
-test("keeps the enabled switch live for built-ins whose fields stay read-only", () => {
-  assert.match(source, /function isTogglableScope\(scope: SubagentScope\): boolean \{\s*return isWritableScope\(scope\) \|\| scope === "builtin";/);
-  assert.match(source, /const switchDisabled = creating\s*\? disabled\s*: !selected \|\| !isTogglableScope\(selected\.scope\) \|\| saving \|\| toggling;/);
-  assert.match(source, /if \(!selected \|\| !isTogglableScope\(selected\.scope\)\) return;/);
-  // Everything else on a built-in stays read-only: only the switch has somewhere to write.
-  assert.match(source, /setMode\(isWritableScope\(profile\.scope\) \? "edit" : "view"\)/);
+test("persists the enabled flag through the profile draft and PUT", () => {
+  assert.match(source, /<ConfigSwitch checked=\{draft\.enabled\} disabled=\{disabled\}[\s\S]*?onChange=\{\(checked\) => update\("enabled", checked\)\}/);
+  assert.match(source, /JSON\.stringify\(\{ cwd, scope: targetScope, profile: draft \}\)/);
+  assert.doesNotMatch(source, /method: "PATCH"/);
 });
 
-test("persists existing profile toggles immediately without submitting unsaved fields", () => {
-  assert.match(source, /const toggleEnabled = async \(enabled: boolean\)/);
-  assert.match(source, /method: "PATCH"/);
-  assert.match(source, /JSON\.stringify\(\{ cwd, scope: selected\.scope, name: selected\.name, enabled \}\)/);
-  assert.match(source, /setDraft\(\(current\) => \(\{ \.\.\.current, enabled: saved\.enabled \}\)\)/);
-  assert.doesNotMatch(source, /method: "PATCH"[\s\S]*?profile: draft/);
+test("omits the removed built-in scope from the sidebar groups", () => {
+  assert.doesNotMatch(source, /"builtin" as const|scope === "builtin"|agents\.scope\.builtin/);
 });
 
 test("reuses the ChatInput model selector with scoped models", () => {
