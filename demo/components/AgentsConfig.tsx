@@ -502,6 +502,7 @@ export function AgentsConfig({
 
   const remove = async () => {
     if (!selected || !isWritableScope(selected.scope)) return;
+    resetRawEntries();
     if (!window.confirm(t("agents.deleteConfirm", { name: selected.displayName ?? selected.name }))) return;
     setSaving(true);
     setError(null);

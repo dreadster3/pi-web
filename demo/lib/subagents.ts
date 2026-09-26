@@ -389,10 +389,11 @@ function parseProfileFile(filePath: string, scope: SubagentScope): SubagentProfi
     const tools = parseToolsField(data.tools);
     const excludeTools = optionalList(data.excludeTools !== undefined ? data.excludeTools : data.disallowed_tools);
 
-    let skills = optionalList(data.skills);
-    // pi-subagents reads `skill || skills`; normalize the legacy alias into the
-    // single `skills` source so an edited list is never shadowed by a stale alias.
-    if (skills === undefined) skills = optionalList(data.skill);
+    // pi-subagents reads `skill || skills` (the alias wins when both are
+    // present); mirror that precedence, then normalize the alias away on save so
+    // an edited list is never shadowed by a stale `skill` after the round-trip.
+    let skills = optionalList(data.skill);
+    if (skills === undefined) skills = optionalList(data.skills);
     let inheritSkillsFlag = booleanValue(data.inheritSkills) ?? booleanValue(data.load_skills);
     // The old editor wrote `skills: true` before the alias became an allowlist.
     if (typeof data.skills === "boolean") {
