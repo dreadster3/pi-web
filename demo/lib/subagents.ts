@@ -4,6 +4,7 @@ import { dump as stringifyYaml } from "js-yaml";
 import { existsSync, mkdirSync, readdirSync, readFileSync, unlinkSync } from "fs";
 import { basename, dirname, join, resolve } from "path";
 import { parseFrontmatter } from "./frontmatter";
+import { findConfiguredProjectRoot } from "./pi-subagents-catalog";
 import { writePrivateFileAtomicSync } from "./atomic-file";
 import { isExistingPathWithinRoots } from "./path-security";
 import type { SessionEntry, SubagentSessionStatus } from "./types";
@@ -274,13 +275,22 @@ function parseProfileFile(filePath: string, scope: SubagentScope): SubagentProfi
   }
 }
 
-function isProjectProfilePathAllowed(cwd: string, target: string): boolean {
-  return isExistingPathWithinRoots(target, new Set([cwd]));
+function isProjectProfilePathAllowed(projectRoot: string, target: string): boolean {
+  return isExistingPathWithinRoots(target, new Set([projectRoot]));
 }
 
-function readProfileDirectory(dir: string, scope: SubagentScope, cwd: string): SubagentProfile[] {
+/**
+ * pi-subagents discovers project agents at the nearest project root rather than
+ * the session cwd, so a session opened in a subdirectory sees (and edits) the
+ * same profiles the runtime loads. Falls back to cwd for a bare directory.
+ */
+function projectRootFor(cwd: string): string {
+  return findConfiguredProjectRoot(cwd) ?? resolve(cwd);
+}
+
+function readProfileDirectory(dir: string, scope: SubagentScope, projectRoot: string): SubagentProfile[] {
   if (!existsSync(dir)) return [];
-  if (scope !== "global" && !isProjectProfilePathAllowed(cwd, dir)) return [];
+  if (scope !== "global" && !isProjectProfilePathAllowed(projectRoot, dir)) return [];
   return readdirSync(dir, { withFileTypes: true })
     .filter((entry) => entry.isFile() && entry.name.endsWith(".md"))
     .map((entry) => parseProfileFile(join(dir, entry.name), scope))
@@ -288,18 +298,20 @@ function readProfileDirectory(dir: string, scope: SubagentScope, cwd: string): S
 }
 
 function profileDirectories(cwd: string): Array<[string, Exclude<SubagentScope, "builtin">]> {
+  const projectRoot = projectRootFor(cwd);
   return [
     [join(getAgentDir(), "agents"), "global"],
-    [join(resolve(cwd), ".agents", "agents"), "workspace"],
-    [join(resolve(cwd), ".pi", "agents"), "project"],
+    [join(projectRoot, ".agents"), "workspace"],
+    [join(projectRoot, ".pi", "agents"), "project"],
   ];
 }
 
 /** Every configured source, including profiles shadowed by a higher-precedence scope. */
 export function listSubagentProfileSources(cwd: string): SubagentProfile[] {
+  const projectRoot = projectRootFor(cwd);
   const profiles: SubagentProfile[] = [];
   for (const [dir, scope] of profileDirectories(cwd)) {
-    profiles.push(...readProfileDirectory(dir, scope, cwd));
+    profiles.push(...readProfileDirectory(dir, scope, projectRoot));
   }
   return profiles.sort((a, b) => a.displayName.localeCompare(b.displayName));
 }
@@ -314,13 +326,14 @@ function assertProfileName(name: string): string {
 
 function writableProfileDirectory(cwd: string, scope: SubagentWritableScope): string {
   if (scope === "global") return join(getAgentDir(), "agents");
-  if (scope === "project") return join(resolve(cwd), ".pi", "agents");
+  if (scope === "project") return join(projectRootFor(cwd), ".pi", "agents");
   throw new Error("Agent scope must be global or project");
 }
 
 function assertWritableProfileDirectory(cwd: string, scope: SubagentWritableScope): string {
   const dir = writableProfileDirectory(cwd, scope);
   if (scope === "global") return dir;
+  const projectRoot = projectRootFor(cwd);
 
   let existingAncestor = dir;
   while (!existsSync(existingAncestor)) {
@@ -328,7 +341,7 @@ function assertWritableProfileDirectory(cwd: string, scope: SubagentWritableScop
     if (parent === existingAncestor) throw new Error("Agent profile directory is outside the project root");
     existingAncestor = parent;
   }
-  if (!isProjectProfilePathAllowed(cwd, existingAncestor)) {
+  if (!isProjectProfilePathAllowed(projectRoot, existingAncestor)) {
     throw new Error("Agent profile directory is outside the project root");
   }
   return dir;
@@ -360,7 +373,7 @@ export function saveSubagentProfile(
   const promptMode = profile.promptMode === "replace" ? "replace" : "append";
   const dir = assertWritableProfileDirectory(cwd, scope);
   mkdirSync(dir, { recursive: true });
-  if (scope === "project" && !isProjectProfilePathAllowed(cwd, dir)) {
+  if (scope === "project" && !isProjectProfilePathAllowed(projectRootFor(cwd), dir)) {
     throw new Error("Agent profile directory is outside the project root");
   }
   const filePath = join(dir, `${name}.md`);

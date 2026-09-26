@@ -54,6 +54,14 @@ in `lib/api-types.ts`, mirroring the real app. The subagent tutorial session
 and only exercises the kept legacy rendering path; live delegation comes from
 the user-installed `pi-subagents` package.
 
+The Agents panel shows both halves: the editable profile files from
+`/api/subagents/profiles`, and the read-only agent catalog from
+`/api/subagents/catalog` (the pi-subagents built-ins plus package and user
+agents, with their aliases, model, thinking level, and shadowing). The mock
+answers that route from `mock/captured/subagent-catalog.json` with a subset of
+the real pi-subagents built-ins, so the demo shows the catalog without the
+package installed.
+
 To pick up UI changes from the main project, copy the updated files over and
 re-apply the changes above (search for `demo` / `@/mock` in those files).
 

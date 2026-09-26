@@ -1,0 +1,78 @@
+{
+ "agents": [
+  {
+   "name": "codex-exec",
+   "description": "Read-only Codex CLI execution for a supplied handoff; requires local authentication",
+   "source": "builtin",
+   "filePath": "/Users/demo/.pi/agent/npm/node_modules/pi-subagents/agents/codex-exec.md",
+   "executable": false
+  },
+  {
+   "name": "delegate",
+   "description": "Lightweight subagent that inherits the parent model with no default reads",
+   "source": "builtin",
+   "filePath": "/Users/demo/.pi/agent/npm/node_modules/pi-subagents/agents/delegate.md",
+   "tools": ["read", "grep", "find", "ls", "bash", "edit", "write", "contact_supervisor"]
+  },
+  {
+   "name": "evidence-auditor",
+   "description": "Independent audit of claims against their cited evidence",
+   "source": "builtin",
+   "filePath": "/Users/demo/.pi/agent/npm/node_modules/pi-subagents/agents/evidence-auditor.md",
+   "tools": ["read", "web_search", "fetch_content", "get_search_content", "source_check"],
+   "thinking": "high"
+  },
+  {
+   "name": "oracle",
+   "description": "High-context decision-consistency oracle that protects inherited state and prevents drift",
+   "source": "builtin",
+   "filePath": "/Users/demo/.pi/agent/npm/node_modules/pi-subagents/agents/oracle.md",
+   "aliases": ["advisor"],
+   "tools": ["read", "grep", "find", "ls", "bash"],
+   "thinking": "high"
+  },
+  {
+   "name": "researcher",
+   "description": "Autonomous web researcher — searches, evaluates, and synthesizes a focused research brief",
+   "source": "builtin",
+   "filePath": "/Users/demo/.pi/agent/npm/node_modules/pi-subagents/agents/researcher.md",
+   "tools": ["read", "write", "web_search", "fetch_content", "get_search_content", "source_check"],
+   "thinking": "medium"
+  },
+  {
+   "name": "reviewer",
+   "description": "Versatile review specialist for code diffs, plans, proposed solutions, codebase health, and PR/issue validation",
+   "source": "user",
+   "filePath": "/Users/demo/.pi/agent/agents/reviewer.md",
+   "tools": ["read", "bash", "edit", "write", "grep", "find", "ls"],
+   "thinking": "max"
+  },
+  {
+   "name": "reviewer",
+   "description": "Versatile review specialist for code diffs, plans, proposed solutions, codebase health, and PR/issue validation",
+   "source": "builtin",
+   "filePath": "/Users/demo/.pi/agent/npm/node_modules/pi-subagents/agents/reviewer.md",
+   "tools": ["read", "grep", "find", "ls", "watchdog_diff", "contact_supervisor"],
+   "thinking": "high",
+   "overriddenBy": "user"
+  },
+  {
+   "name": "scout",
+   "description": "Fast codebase recon that returns compressed context for handoff",
+   "source": "builtin",
+   "filePath": "/Users/demo/.pi/agent/npm/node_modules/pi-subagents/agents/scout.md",
+   "tools": ["read", "grep", "find", "ls", "bash", "write", "contact_supervisor"],
+   "thinking": "low",
+   "advertise": true
+  },
+  {
+   "name": "worker",
+   "description": "Implementation agent for normal tasks and approved oracle handoffs",
+   "source": "builtin",
+   "filePath": "/Users/demo/.pi/agent/npm/node_modules/pi-subagents/agents/worker.md",
+   "aliases": ["developer", "coder", "implementer", "develop"],
+   "tools": ["read", "grep", "find", "ls", "bash", "edit", "write", "contact_supervisor"],
+   "thinking": "high"
+  }
+ ]
+}
