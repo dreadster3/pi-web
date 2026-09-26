@@ -10,6 +10,17 @@ export interface SubagentCatalogResponse {
   agents: AgentCatalogAgent[];
 }
 
+/** One selectable child tool the profile editor can checkbox. */
+export interface SubagentToolInfo {
+  name: string;
+  description?: string;
+  source: "builtin" | "extension";
+}
+
+export interface SubagentToolsResponse {
+  tools: SubagentToolInfo[];
+}
+
 /** Tool-result details persisted by the removed built-in subagent engine. */
 export interface SubagentToolDetails {
   kind: "pi-web-subagent";
