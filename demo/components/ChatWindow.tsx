@@ -23,6 +23,7 @@ import { useIsMobile } from "@/hooks/useIsMobile";
 import { useScrollbarVisibility } from "@/hooks/useScrollbarVisibility";
 import type { SessionStatsInfo } from "@/lib/pi-types";
 import type { AppUpdateResponse } from "@/lib/api-types";
+import { parseAsyncSnapshotWidgetLine, flattenPiSubagentSnapshot, type PiSubagentSnapshotNode } from "@/lib/pi-subagents-snapshot";
 import type { ToolEntry } from "@/lib/tool-presets";
 import { findChatScrollAnchor, type ChatScrollPosition } from "@/lib/chat-scroll-position";
 import {
@@ -54,6 +55,8 @@ interface Props {
   onSystemToolsChange?: (tools: ToolEntry[] | null) => void;
   onSystemInfoLoaderChange?: (loader: (() => Promise<void>) | null) => void;
   onSessionStatsChange?: (stats: SessionStatsInfo | null) => void;
+  /** Live pi-subagents runs parsed from the `subagent-async` extension widget. */
+  onSubagentRunsChange?: (runs: PiSubagentSnapshotNode[]) => void;
   onSessionStatsPanelOpen?: () => void;
   onContextUsageChange?: (usage: { percent: number | null; contextWindow: number; tokens: number | null } | null) => void;
   onOpenFile?: (filePath: string, page?: number) => void;
@@ -242,7 +245,7 @@ function ProcessDetailsGroup({ messageCount, toolCallCount, defaultExpanded = fa
   );
 }
 
-export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initialScrollPosition, onScrollPositionChange, sessionRunning, newSessionCwd, newSessionDraftKey, onAgentEnd, onAttentionNeeded, onSessionCreated, onSessionForked, modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSystemToolsChange, onSystemInfoLoaderChange, onSessionStatsChange, onSessionStatsPanelOpen, onContextUsageChange, onOpenFile, onOpenSession, onAskInNewChat, quoteSelectionEnabled = false, initialPrompt, onInitialPromptConsumed, soundEnabled = true, onSoundToggle, playDoneSound = () => {}, unlockAudio }: Props) {
+export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initialScrollPosition, onScrollPositionChange, sessionRunning, newSessionCwd, newSessionDraftKey, onAgentEnd, onAttentionNeeded, onSessionCreated, onSessionForked, modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSystemToolsChange, onSystemInfoLoaderChange, onSessionStatsChange, onSubagentRunsChange, onSessionStatsPanelOpen, onContextUsageChange, onOpenFile, onOpenSession, onAskInNewChat, quoteSelectionEnabled = false, initialPrompt, onInitialPromptConsumed, soundEnabled = true, onSoundToggle, playDoneSound = () => {}, unlockAudio }: Props) {
   const { t } = useI18n();
   const isMobile = useIsMobile();
   const completionNotificationsEnabled = session?.relation?.kind !== "subagent";
@@ -703,6 +706,25 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
     onSessionStatsChange?.(sessionStatsRef.current);
   }, [statsKey, onSessionStatsChange]);
   useEffect(() => () => { onSessionStatsChange?.(null); }, [onSessionStatsChange]);
+
+  // pi-subagents publishes its live run status as one `subagent-async` widget
+  // line. Lift the parsed runs to AppShell so the Agents panel can show
+  // progress for the whole family, not just the selected session's tree.
+  const subagentRuns = useMemo(() => {
+    const widget = extensionWidgets.find((candidate) => candidate.key === "subagent-async");
+    if (!widget) return [];
+    const snapshot = parseAsyncSnapshotWidgetLine(widget.lines.join("\n"));
+    return snapshot ? flattenPiSubagentSnapshot(snapshot) : [];
+  }, [extensionWidgets]);
+  const subagentRunsKey = subagentRuns
+    .map((run) => `${run.id}|${run.state}|${run.activity?.currentTool ?? ""}|${run.activity?.toolCount ?? ""}|${run.activity?.turnCount ?? ""}`)
+    .join(";");
+  const subagentRunsRef = useRef(subagentRuns);
+  subagentRunsRef.current = subagentRuns;
+  useEffect(() => {
+    onSubagentRunsChange?.(subagentRunsRef.current);
+  }, [subagentRunsKey, onSubagentRunsChange]);
+  useEffect(() => () => { onSubagentRunsChange?.([]); }, [onSubagentRunsChange]);
 
   // Push context usage up to AppShell as well.
   const ctxKey = contextUsage

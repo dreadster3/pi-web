@@ -28,8 +28,24 @@ test("renders as a compact left-positioned dropdown without a centered inner wid
 });
 
 test("shows persisted completion states while live running state takes precedence", () => {
-  assert.match(source, /const status: SubagentSessionStatus = running \? "running" : relation\?\.status \?\? "completed"/);
+  assert.match(source, /const status: SubagentSessionStatus = running \|\| progress\?\.status === "running"/);
   assert.match(source, /t\(`agentSwitcher\.status\.\$\{status\}`\)/);
   assert.match(source, /status === "failed"/);
   assert.match(source, /status === "aborted" \|\| status === "interrupted"/);
+});
+
+test("surfaces per-run progress from the subagent-async snapshot while falling back to relation status", () => {
+  // Live runs come in as an optional prop; without one the row keeps using
+  // relation.status, so older sessions and the demo still render.
+  assert.match(source, /liveRuns\?: PiSubagentSnapshotNode\[\]/);
+  assert.match(source, /liveRuns = \[\]/);
+  assert.match(source, /progress\?\.status \?\? relation\?\.status \?\? "completed"/);
+  // Run id joins by the explicit relation.runId, then by path/name substring.
+  assert.match(source, /session\.relation\.runId/);
+  assert.match(source, /session\.path\.includes\(run\.id\)/);
+  // Progress text reuses the existing rows/styles rather than a new panel.
+  assert.match(source, /agentSwitcher\.run\.tool/);
+  assert.match(source, /agentSwitcher\.run\.turns/);
+  assert.match(source, /agentSwitcher\.run\.tools/);
+  assert.match(source, /formatElapsed\(progress\.startedAt, progress\.endedAt \?\? Date\.now\(\)\)/);
 });

@@ -3,13 +3,25 @@
 import { useMemo, useState } from "react";
 import { useI18n } from "@/hooks/useI18n";
 import type { SessionInfo, SubagentSessionStatus } from "@/lib/types";
+import { mapPiSubagentRunState, type PiSubagentSnapshotActivity, type PiSubagentSnapshotNode } from "@/lib/pi-subagents-snapshot";
 
 interface Props {
   rootSession: SessionInfo;
   subagents: SessionInfo[];
   selectedSessionId: string;
   runningSessionIds: ReadonlySet<string>;
+  /** Live runs from the pi-subagents `subagent-async` widget, when present. */
+  liveRuns?: PiSubagentSnapshotNode[];
   onSelectSession: (session: SessionInfo) => void;
+}
+
+/** One run's live activity, reduced to the fields the panel renders. */
+interface RunProgress {
+  label: string;
+  status: SubagentSessionStatus;
+  startedAt?: number;
+  endedAt?: number;
+  activity?: PiSubagentSnapshotActivity;
 }
 
 function sessionTitle(session: SessionInfo): string {
@@ -67,26 +79,84 @@ function StatusIcon({ status }: { status: SubagentSessionStatus }) {
   );
 }
 
+function formatElapsed(startedAt: number | undefined, endAt: number): string {
+  if (!startedAt || !Number.isFinite(startedAt)) return "";
+  const totalSeconds = Math.max(0, Math.floor((endAt - startedAt) / 1000));
+  if (totalSeconds < 60) return `${totalSeconds}s`;
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  if (minutes < 60) return `${minutes}m ${seconds}s`;
+  return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+}
+
+/** Compact progress line: current tool, elapsed time, turn and tool counts. */
+function formatRunProgress(progress: RunProgress, t: (key: string, params?: Record<string, string | number>) => string): string {
+  const parts: string[] = [];
+  // A finished run's last tool is history, not "current"; keep it for live runs only.
+  if (progress.status === "running" && progress.activity?.currentTool) {
+    parts.push(t("agentSwitcher.run.tool", { name: progress.activity.currentTool }));
+  }
+  const elapsed = formatElapsed(progress.startedAt, progress.endedAt ?? Date.now());
+  if (elapsed) parts.push(elapsed);
+  if (progress.activity?.turnCount !== undefined) parts.push(t("agentSwitcher.run.turns", { count: progress.activity.turnCount }));
+  if (progress.activity?.toolCount !== undefined) parts.push(t("agentSwitcher.run.tools", { count: progress.activity.toolCount }));
+  return parts.join(" · ");
+}
+
+/**
+ * Map a run id to the subagent row that owns it. pi-subagents names child
+ * directories by run (`async-<runId>`) or session (`subagent-<agent>-<runId>`),
+ * so the run id is a substring of the session's path or name.
+ */
+function buildRunProgress(subagents: readonly SessionInfo[], liveRuns: readonly PiSubagentSnapshotNode[]): Map<string, RunProgress> {
+  const byKey = new Map<string, RunProgress>();
+  if (liveRuns.length === 0) return byKey;
+  const sessionByRunId = new Map<string, SessionInfo>();
+  for (const session of subagents) {
+    const runId = session.relation?.kind === "subagent" ? session.relation.runId : undefined;
+    if (runId) sessionByRunId.set(runId, session);
+  }
+  for (const run of liveRuns) {
+    const owner = sessionByRunId.get(run.id)
+      ?? subagents.find((session) => session.path.includes(run.id) || session.name?.includes(run.id));
+    if (!owner) continue;
+    byKey.set(owner.id, {
+      label: run.label,
+      status: mapPiSubagentRunState(run.state),
+      ...(run.startedAt !== undefined ? { startedAt: run.startedAt } : {}),
+      ...(run.endedAt !== undefined ? { endedAt: run.endedAt } : {}),
+      ...(run.activity ? { activity: run.activity } : {}),
+    });
+  }
+  return byKey;
+}
+
 function AgentRow({
   session,
   main,
   selected,
   running,
+  progress,
   onSelect,
 }: {
   session: SessionInfo;
   main?: boolean;
   selected: boolean;
   running: boolean;
+  progress?: RunProgress;
   onSelect: () => void;
 }) {
   const { locale, t } = useI18n();
   const relation = session.relation?.kind === "subagent" ? session.relation : null;
-  const status: SubagentSessionStatus = running ? "running" : relation?.status ?? "completed";
+  const status: SubagentSessionStatus = running || progress?.status === "running"
+    ? "running"
+    : progress?.status ?? relation?.status ?? "completed";
   const primary = main ? t("agentSwitcher.main") : relation?.description || sessionTitle(session);
-  const secondary = main
+  const baseSecondary = main
     ? sessionTitle(session)
     : `${relation?.profile ?? t("agentSwitcher.subagent")} · ${formatRelativeTime(session.modified, locale)}`;
+  const progressText = !main && progress ? formatRunProgress(progress, t) : "";
+  const secondary = progressText ? `${progressText} · ${baseSecondary}` : baseSecondary;
 
   return (
     <button
@@ -150,15 +220,26 @@ function AgentRow({
   );
 }
 
-export function AgentSessionPanel({ rootSession, subagents, selectedSessionId, runningSessionIds, onSelectSession }: Props) {
+export function AgentSessionPanel({ rootSession, subagents, selectedSessionId, runningSessionIds, liveRuns = [], onSelectSession }: Props) {
   const { t } = useI18n();
   const [query, setQuery] = useState("");
+  const runProgress = useMemo(() => buildRunProgress(subagents, liveRuns), [subagents, liveRuns]);
+  // A live pi-subagents run is not a pi-web RPC session, so runningSessionIds
+  // never lists it; fold live run state in so sorting and the count agree.
+  const liveRunningIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const [sessionId, progress] of runProgress) {
+      if (progress.status === "running") ids.add(sessionId);
+    }
+    return ids;
+  }, [runProgress]);
+  const isSessionRunning = (sessionId: string) => runningSessionIds.has(sessionId) || liveRunningIds.has(sessionId);
   const sortedSubagents = useMemo(() => [...subagents].sort((a, b) => {
-    const aRunning = runningSessionIds.has(a.id);
-    const bRunning = runningSessionIds.has(b.id);
+    const aRunning = runningSessionIds.has(a.id) || liveRunningIds.has(a.id);
+    const bRunning = runningSessionIds.has(b.id) || liveRunningIds.has(b.id);
     if (aRunning !== bRunning) return aRunning ? -1 : 1;
     return b.modified.localeCompare(a.modified);
-  }), [runningSessionIds, subagents]);
+  }), [runningSessionIds, liveRunningIds, subagents]);
   const normalizedQuery = query.trim().toLowerCase();
   const visibleSubagents = normalizedQuery
     ? sortedSubagents.filter((session) => {
@@ -167,7 +248,7 @@ export function AgentSessionPanel({ rootSession, subagents, selectedSessionId, r
           .some((value) => value?.toLowerCase().includes(normalizedQuery));
       })
     : sortedSubagents;
-  const runningCount = subagents.filter((session) => runningSessionIds.has(session.id)).length;
+  const runningCount = subagents.filter((session) => isSessionRunning(session.id)).length;
 
   return (
     <div
@@ -224,7 +305,8 @@ export function AgentSessionPanel({ rootSession, subagents, selectedSessionId, r
               key={session.id}
               session={session}
               selected={session.id === selectedSessionId}
-              running={runningSessionIds.has(session.id)}
+              running={isSessionRunning(session.id)}
+              progress={runProgress.get(session.id)}
               onSelect={() => onSelectSession(session)}
             />
           ))}
