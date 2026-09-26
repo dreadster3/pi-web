@@ -743,12 +743,21 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
   useEffect(() => {
     if (!hasLiveSubagentRun || agentRunning) return;
     let interval: ReturnType<typeof setInterval> | undefined;
+    let controller: AbortController | null = null;
     const poll = () => {
+      // Match the sidebar's convention: a background tab has no reason to keep
+      // re-reading wrapper state, and the visibilitychange nudge only fetches
+      // once the tab is visible again.
+      if (document.visibilityState !== "visible") return;
       const sid = sessionIdRef.current ?? session?.id;
       if (!sid) return;
-      void fetch(`/api/agent/${encodeURIComponent(sid)}`)
+      controller?.abort();
+      const current = new AbortController();
+      controller = current;
+      void fetch(`/api/agent/${encodeURIComponent(sid)}`, { signal: current.signal })
         .then((response) => response.json() as Promise<{ state?: AgentStateResponse }>)
         .then((data) => {
+          if (controller !== current) return;
           if (sessionIdRef.current !== sid && session?.id !== sid) return;
           if (data.state?.extensionWidgets !== undefined) {
             setExtensionWidgets(data.state.extensionWidgets ?? []);
@@ -761,12 +770,17 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
             interval = undefined;
           }
         })
-        .catch(() => {});
+        .catch(() => {})
+        .finally(() => {
+          if (controller === current) controller = null;
+        });
     };
     interval = setInterval(poll, SUBAGENT_RUN_POLL_MS);
     document.addEventListener("visibilitychange", poll);
     return () => {
       if (interval) clearInterval(interval);
+      controller?.abort();
+      controller = null;
       document.removeEventListener("visibilitychange", poll);
     };
   }, [hasLiveSubagentRun, agentRunning, session?.id, setExtensionWidgets, sessionIdRef]);

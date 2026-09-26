@@ -71,10 +71,19 @@ const RUN_STATES: ReadonlySet<string> = new Set([
   "rejected",
 ]);
 
-function asState(value: unknown): PiSubagentRunState {
-  return typeof value === "string" && RUN_STATES.has(value)
-    ? (value as PiSubagentRunState)
-    : "failed";
+// The on-disk step vocabulary spells the two ends of the run lifecycle as
+// `pending` and `completed`; the package's own projection normalizes them
+// before any consumer sees them, so do the same here rather than reading a
+// queued or finished step as a failure.
+const RUN_STATE_ALIASES: Readonly<Record<string, PiSubagentRunState>> = {
+  pending: "queued",
+  completed: "complete",
+};
+
+function asState(value: unknown): PiSubagentRunState | undefined {
+  if (typeof value !== "string") return undefined;
+  const normalized = RUN_STATE_ALIASES[value] ?? value;
+  return RUN_STATES.has(normalized) ? (normalized as PiSubagentRunState) : undefined;
 }
 
 function numericTotal(value: unknown): number | undefined {
@@ -111,7 +120,7 @@ export function resolveTempRoots(
     });
 }
 
-function parseStep(value: unknown): PiSubagentRunStep | null {
+function parseStep(value: unknown, runState: PiSubagentRunState): PiSubagentRunStep | null {
   if (!isRecord(value)) return null;
   return {
     agent: asString(value.agent) ?? "subagent",
@@ -120,7 +129,7 @@ function parseStep(value: unknown): PiSubagentRunStep | null {
     ...(asString(value.sessionName) ? { sessionName: asString(value.sessionName) } : {}),
     ...(asString(value.description) ? { description: asString(value.description) } : {}),
     ...(asString(value.sessionFile) ? { sessionFile: asString(value.sessionFile) } : {}),
-    status: asState(value.status),
+    status: asState(value.status) ?? runState,
     ...(asString(value.currentTool) ? { currentTool: asString(value.currentTool) } : {}),
     ...(asNumber(value.turnCount) !== undefined ? { turnCount: asNumber(value.turnCount) } : {}),
     ...(asNumber(value.toolCount) !== undefined ? { toolCount: asNumber(value.toolCount) } : {}),
@@ -140,9 +149,9 @@ function parseRunStatus(path: string, runId: string): PiSubagentRun | null {
   }
   if (!isRecord(parsed)) return null;
 
-  const state = asState(parsed.state);
+  const state = asState(parsed.state) ?? "failed";
   const steps = Array.isArray(parsed.steps)
-    ? parsed.steps.map(parseStep).filter((step): step is PiSubagentRunStep => step !== null)
+    ? parsed.steps.map((step) => parseStep(step, state)).filter((step): step is PiSubagentRunStep => step !== null)
     : [];
   return {
     runId,

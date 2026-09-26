@@ -13,7 +13,7 @@ import { sessionPathKey } from "./session-path";
 import { MAX_TOOL_RESULT_IMAGE_BYTES, TOOL_RESULT_IMAGE_MIMES } from "./tool-result-images";
 import { resolveProject, type ProjectInfo } from "./worktree";
 import { readSubagentRun, SUBAGENT_META_TYPE } from "./subagents";
-import { listSessionsIncremental, type ScannedSessionInfo } from "./session-list-scanner";
+import { listSessionsIncremental, NO_MESSAGES_PLACEHOLDER, type ScannedSessionInfo } from "./session-list-scanner";
 import { readAsyncRunStatuses, type PiSubagentRun, type PiSubagentRunStep } from "./pi-subagents-runs";
 import { mapPiSubagentRunState } from "./pi-subagents-snapshot";
 import { hasActiveSessionLivenessProvider } from "./session-liveness";
@@ -342,7 +342,7 @@ function derivePiSubagentRelation(
     ?? "subagent";
   // The scan's placeholder is not a description; let an absent first message
   // fall through to the profile at the return below.
-  const firstMessage = scanned.firstMessage === "(no messages)" ? "" : scanned.firstMessage;
+  const firstMessage = scanned.firstMessage === NO_MESSAGES_PLACEHOLDER ? "" : scanned.firstMessage;
   const description = matched?.step.sessionName
     ?? matched?.step.description
     ?? excerpt(firstMessage);
@@ -426,7 +426,7 @@ function mapScannedSession(
     // real "(no messages)" session until the details arrive.
     firstMessage: detailsPending && !scanned.firstMessage
       ? ""
-      : scanned.firstMessage || "(no messages)",
+      : scanned.firstMessage || NO_MESSAGES_PLACEHOLDER,
     parentSessionId: originSessionId ?? (relation?.kind === "subagent" ? relation.parentSessionId : undefined),
     ...(relation ? { relation } : {}),
     transient: false,

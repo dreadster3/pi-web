@@ -33,6 +33,13 @@ interface Fingerprint {
 
 const SUMMARY_HEADER_MAX_BYTES = 64 * 1024;
 
+/**
+ * First-message text for a session with no user message yet. Shared with
+ * `session-reader`, which strips it again before deriving a description, so the
+ * two must never drift apart.
+ */
+export const NO_MESSAGES_PLACEHOLDER = "(no messages)";
+
 interface IndexEntry {
 	fp: Fingerprint;
 	info: ScannedSessionInfo;
@@ -236,7 +243,7 @@ export async function scanSessionFileInfo(
 			created: new Date(header.timestamp as string),
 			modified,
 			messageCount,
-			firstMessage: firstMessage || "(no messages)",
+			firstMessage: firstMessage || NO_MESSAGES_PLACEHOLDER,
 		};
 	} catch {
 		return null;
