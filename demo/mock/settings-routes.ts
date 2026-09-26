@@ -7,6 +7,7 @@
 import skillsResponse from "./captured/skills.json";
 import subagentCatalogResponse from "./captured/subagent-catalog.json";
 import subagentProfilesResponse from "./captured/subagent-profiles.json";
+import toolsResponse from "./captured/tools.json";
 import type { MockRequest } from "./http";
 import { delay, error, json } from "./http";
 import { currentDemoLocale } from "./locale";
@@ -22,7 +23,24 @@ const enabledView: EnabledView = structuredClone(ENABLED_MODELS_RESPONSE);
 const authState = structuredClone(AUTH_PROVIDERS_RESPONSE);
 let modelsConfig = structuredClone(MODELS_CONFIG);
 const skillsState = structuredClone(skillsResponse);
-const profilesState = structuredClone(subagentProfilesResponse) as { profiles: Array<Record<string, unknown> & { name: string; scope: string; enabled?: boolean }> };
+const profilesState = structuredClone(subagentProfilesResponse) as { profiles: Array<Record<string, unknown> & { name: string; scope: string }> };
+
+/**
+ * Mirrors GET /api/subagents/tools: the builtin 8 plus the `subagent` tool the
+ * installed pi-subagents package registers. Descriptions reuse the captured
+ * tool metadata.
+ */
+function subagentTools(): Array<{ name: string; description?: string; source: "builtin" | "extension" }> {
+  const captured = toolsResponse as Array<{ name: string; description?: string }>;
+  const describe = (name: string) => captured.find((tool) => tool.name === name)?.description;
+  const builtin = ["read", "bash", "powershell", "edit", "write", "grep", "find", "ls"];
+  const extension = ["subagent"];
+  return [
+    ...builtin.map((name) => ({ name, ...(describe(name) ? { description: describe(name) } : {}), source: "builtin" as const })),
+    ...extension.map((name) => ({ name, ...(describe(name) ? { description: describe(name) } : {}), source: "extension" as const })),
+  ];
+}
+const SUBAGENT_TOOL_LIST = subagentTools();
 
 function isProviderLoggedIn(providerId: string): boolean {
   const oauth = authState.oauthProviders.find((provider) => provider.id === providerId);
@@ -256,13 +274,17 @@ async function subagentsRoute(request: MockRequest): Promise<Response> {
     if (request.method === "GET") return json(subagentCatalogResponse);
     return error("Method not allowed", 405);
   }
+  if (request.segments[2] === "tools") {
+    if (request.method === "GET") return json({ tools: SUBAGENT_TOOL_LIST });
+    return error("Method not allowed", 405);
+  }
   if (request.segments[2] !== "profiles") return error("Not found", 404);
   if (request.method === "GET") return json(profilesState);
   const body = await request.json<{ scope?: string; name?: string; profile?: Record<string, unknown> & { name: string } }>();
   if (request.method === "PUT" && body.profile) {
     const incoming = body.profile;
     const replaced = profilesState.profiles.find((candidate) => candidate.name === incoming.name && candidate.scope === (body.scope ?? "global"));
-    const saved = { ...body.profile, scope: body.scope ?? "global", enabled: body.profile.enabled ?? true, ...(replaced?.filePath ? { filePath: replaced.filePath } : {}) } as (typeof profilesState.profiles)[number];
+    const saved = { ...body.profile, scope: body.scope ?? "global", ...(replaced?.filePath ? { filePath: replaced.filePath } : {}) } as (typeof profilesState.profiles)[number];
     profilesState.profiles = [...profilesState.profiles.filter((candidate) => !(candidate.name === saved.name && candidate.scope === saved.scope)), saved];
     return json({ profile: saved });
   }

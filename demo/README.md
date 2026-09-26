@@ -60,7 +60,9 @@ The Agents panel shows both halves: the editable profile files from
 agents, with their aliases, model, thinking level, and shadowing). The mock
 answers that route from `mock/captured/subagent-catalog.json` with a subset of
 the real pi-subagents built-ins, so the demo shows the catalog without the
-package installed.
+package installed. The editor's tool checkboxes come from
+`GET /api/subagents/tools`, which the mock answers with the builtin tools plus
+the `subagent` extension tool.
 
 To pick up UI changes from the main project, copy the updated files over and
 re-apply the changes above (search for `demo` / `@/mock` in those files).

@@ -29,12 +29,11 @@ function profile(overrides = {}) {
     displayName: "API test agent",
     description: "Used by route tests",
     systemPrompt: "Return a concise result.",
+    toolsInherited: false,
     tools: [],
-    loadSkills: true,
-    loadExtensions: true,
-    inheritContext: false,
-    runInBackground: true,
-    enabled: true,
+    extensions: { kind: "list", list: ["pi-advisor-flow"] },
+    inheritProjectContext: false,
+    async: true,
     ...overrides,
   };
 }
@@ -57,20 +56,18 @@ test("profiles route creates, lists, and deletes a project profile", async (t) =
   assert.equal(putResponse.status, 200);
   assert.equal(putBody.profile.scope, "project");
   assert.deepEqual(putBody.profile.tools, []);
-  assert.equal(putBody.profile.loadSkills, true);
-  assert.equal(putBody.profile.loadExtensions, true);
+  assert.deepEqual(putBody.profile.extensions, { kind: "list", list: ["pi-advisor-flow"] });
   const source = await readFile(join(cwd, ".pi", "agents", "api-test-agent.md"), "utf8");
-  assert.match(source, /tools: none/);
-  assert.match(source, /load_skills: true/);
-  assert.match(source, /load_extensions: true/);
+  assert.match(source, /^tools: (?:''|""|)$/m);
+  assert.match(source, /extensions: pi-advisor-flow/);
+  assert.match(source, /async: true/);
 
   const getResponse = await GET(new Request(`http://localhost/api/subagents/profiles?cwd=${encodeURIComponent(cwd)}`));
   const getBody = await getResponse.json();
   assert.equal(getResponse.status, 200);
   const listedProfile = getBody.profiles.find((item) => item.name === "api-test-agent");
   assert.deepEqual(listedProfile.tools, []);
-  assert.equal(listedProfile.loadSkills, true);
-  assert.equal(listedProfile.loadExtensions, true);
+  assert.deepEqual(listedProfile.extensions, { kind: "list", list: ["pi-advisor-flow"] });
 
   const deleteResponse = await DELETE(jsonRequest("DELETE", { cwd, scope: "project", name: "api-test-agent" }));
   assert.equal(deleteResponse.status, 200);
