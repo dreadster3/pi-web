@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdirSync, readFileSync, statSync } from "fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, statSync } from "fs";
 import { dirname, join } from "path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { writePrivateFileAtomicSync } from "./atomic-file";
@@ -32,13 +32,28 @@ function readSettingsObject(filePath: string): Record<string, unknown> {
   return parsed;
 }
 
+/**
+ * The real path an atomic write must target. `renameSync` replaces the path
+ * itself, so writing a symlinked settings path directly would turn a
+ * dotfile-managed link into a regular file. Resolving first keeps the link and
+ * updates the file behind it.
+ */
+function settingsWritePath(filePath: string): string {
+  try {
+    return realpathSync(filePath);
+  } catch {
+    return filePath;
+  }
+}
+
 /** Atomic replace, keeping the existing file's permission bits when it has any. */
 function writeSettingsObject(filePath: string, settings: Record<string, unknown>): void {
-  const dir = dirname(filePath);
+  const target = settingsWritePath(filePath);
+  const dir = dirname(target);
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-  const mode = existsSync(filePath) ? statSync(filePath).mode & 0o777 : undefined;
-  writePrivateFileAtomicSync(filePath, `${JSON.stringify(settings, null, 2)}\n`);
-  if (mode !== undefined) chmodSync(filePath, mode);
+  const mode = existsSync(target) ? statSync(target).mode & 0o777 : undefined;
+  writePrivateFileAtomicSync(target, `${JSON.stringify(settings, null, 2)}\n`);
+  if (mode !== undefined) chmodSync(target, mode);
 }
 
 /**

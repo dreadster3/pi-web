@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { existsSync, statSync } from "fs";
 import { getAllowedFileRoots, isExistingFilePathAllowed } from "@/lib/file-access";
-import { listAgentCatalog } from "@/lib/pi-subagents-catalog";
+import { listAgentCatalog, type AgentCatalogAgent } from "@/lib/pi-subagents-catalog";
 import { samePath } from "@/lib/paths";
 import { hasJsonContentType, isApiRequestAllowed } from "@/lib/request-security";
 import { ejectSubagentProfile, SubagentProfileExistsError, type SubagentWritableScope } from "@/lib/subagents";
@@ -20,13 +20,13 @@ async function validateCwd(cwd: unknown): Promise<string> {
  * is the module whose reads already constrain which agent files exist, so
  * membership here is the same path-security posture applied to a write.
  */
-function catalogSourceName(cwd: string, sourcePath: string): string {
+function catalogSource(cwd: string, sourcePath: string): AgentCatalogAgent {
   if (!existsSync(sourcePath) || !statSync(sourcePath).isFile()) {
     throw new Error("Source agent file not found");
   }
   const row = listAgentCatalog(cwd).find((agent) => samePath(agent.filePath, sourcePath));
   if (!row) throw new Error("Source path is not a catalog agent file");
-  return row.name;
+  return row;
 }
 
 function validateScope(scope: unknown): SubagentWritableScope {
@@ -53,8 +53,8 @@ export async function POST(req: Request) {
     }
     // Default the copy to the source's canonical runtime name, so the ejected
     // file shadows the original, matching pi-subagents' own eject action.
-    const canonicalName = catalogSourceName(cwd, body.sourcePath);
-    const profile = ejectSubagentProfile(cwd, scope, body.sourcePath, body.name ?? canonicalName);
+    const source = catalogSource(cwd, body.sourcePath);
+    const profile = ejectSubagentProfile(cwd, scope, body.sourcePath, body.name ?? source.name, source.source);
     return NextResponse.json({ profile });
   } catch (error) {
     if (error instanceof SubagentProfileExistsError) {

@@ -33,7 +33,25 @@ const BUILTIN = [
   "",
 ].join("\n");
 
-/** A cwd that is an allowed file root and holds a discoverable project agent. */
+const builtinSourcePath = join(testAgentDir, "npm", "node_modules", "pi-subagents", "agents", "reviewer.md");
+
+/**
+ * A configured `npm:pi-subagents` install, so the catalog exposes a builtin row
+ * for the eject route. `allowFileRoot` makes the cwd a valid request target.
+ */
+async function builtinFixture(t) {
+  const cwd = await mkdtemp(join(tmpdir(), "pi-web-subagent-eject-"));
+  allowFileRoot(cwd);
+  t.after(() => rm(cwd, { recursive: true, force: true }));
+  const root = join(testAgentDir, "npm", "node_modules", "pi-subagents");
+  await mkdir(join(root, "agents"), { recursive: true });
+  await writeFile(join(root, "package.json"), JSON.stringify({ name: "pi-subagents", version: "0.0.0" }, null, 2));
+  await writeFile(builtinSourcePath, BUILTIN);
+  await writeFile(join(testAgentDir, "settings.json"), JSON.stringify({ packages: ["npm:pi-subagents"] }, null, 2));
+  return { cwd, sourcePath: builtinSourcePath };
+}
+
+/** A cwd holding a discoverable project agent, for the non-builtin rejection. */
 async function projectFixture(t) {
   const cwd = await mkdtemp(join(tmpdir(), "pi-web-subagent-eject-"));
   allowFileRoot(cwd);
@@ -51,8 +69,8 @@ function jsonRequest(body, headers = {}) {
   });
 }
 
-test("eject copies a catalog agent verbatim into the global agent dir", async (t) => {
-  const { cwd, sourcePath } = await projectFixture(t);
+test("eject copies a builtin catalog agent verbatim into the global agent dir", async (t) => {
+  const { cwd, sourcePath } = await builtinFixture(t);
   const response = await POST(jsonRequest({ cwd, scope: "global", sourcePath }));
   const body = await response.json();
   assert.equal(response.status, 200);
@@ -62,25 +80,34 @@ test("eject copies a catalog agent verbatim into the global agent dir", async (t
   await rm(join(testAgentDir, "agents"), { recursive: true, force: true });
 });
 
-test("eject copies into the project scope with a custom name", async (t) => {
-  const { cwd, sourcePath } = await projectFixture(t);
+test("eject copies a builtin into the project scope with a custom name", async (t) => {
+  const { cwd, sourcePath } = await builtinFixture(t);
   const response = await POST(jsonRequest({ cwd, scope: "project", sourcePath, name: "my-reviewer" }));
   assert.equal(response.status, 200);
   assert.equal(await readFile(join(cwd, ".pi", "agents", "my-reviewer.md"), "utf8"), BUILTIN);
 });
 
 test("eject returns 409 when the target file already exists", async (t) => {
-  const { cwd, sourcePath } = await projectFixture(t);
-  // The source itself is already a project agent of that name.
+  const { cwd, sourcePath } = await builtinFixture(t);
+  await mkdir(join(cwd, ".pi", "agents"), { recursive: true });
+  await writeFile(join(cwd, ".pi", "agents", "reviewer.md"), "keep me\n");
   const response = await POST(jsonRequest({ cwd, scope: "project", sourcePath }));
   assert.equal(response.status, 409);
   const body = await response.json();
   assert.match(body.error, /already exists/);
   assert.equal(body.path, join(cwd, ".pi", "agents", "reviewer.md"));
+  assert.equal(await readFile(join(cwd, ".pi", "agents", "reviewer.md"), "utf8"), "keep me\n");
+});
+
+test("eject rejects a user or project scan-dir source as not a bundled agent", async (t) => {
+  const { cwd, sourcePath } = await projectFixture(t);
+  const response = await POST(jsonRequest({ cwd, scope: "global", sourcePath }));
+  assert.equal(response.status, 400);
+  assert.match((await response.json()).error, /Only built-in and package agents can be duplicated/);
 });
 
 test("eject rejects a source outside the catalog and a missing source", async (t) => {
-  const { cwd } = await projectFixture(t);
+  const { cwd } = await builtinFixture(t);
   const outside = await mkdtemp(join(tmpdir(), "pi-web-subagent-eject-outside-"));
   t.after(() => rm(outside, { recursive: true, force: true }));
   await writeFile(join(outside, "rogue.md"), BUILTIN);
@@ -95,7 +122,7 @@ test("eject rejects a source outside the catalog and a missing source", async (t
 });
 
 test("eject validates required fields and the target name", async (t) => {
-  const { cwd, sourcePath } = await projectFixture(t);
+  const { cwd, sourcePath } = await builtinFixture(t);
 
   let response = await POST(jsonRequest({ cwd, scope: "global" }));
   assert.equal(response.status, 400);
@@ -111,7 +138,7 @@ test("eject validates required fields and the target name", async (t) => {
 });
 
 test("eject returns 403 for an unallowed cwd and rejects cross-site or non-JSON requests", async (t) => {
-  const { sourcePath } = await projectFixture(t);
+  const { sourcePath } = await builtinFixture(t);
   const unallowed = await mkdtemp(join(tmpdir(), "pi-web-subagent-eject-unallowed-"));
   t.after(() => rm(unallowed, { recursive: true, force: true }));
 
@@ -119,7 +146,7 @@ test("eject returns 403 for an unallowed cwd and rejects cross-site or non-JSON 
   assert.equal(response.status, 403);
   assert.deepEqual(await response.json(), { error: "Access denied" });
 
-  const { cwd } = await projectFixture(t);
+  const { cwd } = await builtinFixture(t);
   response = await POST(jsonRequest(
     { cwd, scope: "global", sourcePath },
     { origin: "https://evil.example", "sec-fetch-site": "cross-site" },

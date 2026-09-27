@@ -27,7 +27,13 @@ const profilesState = structuredClone(subagentProfilesResponse) as { profiles: A
 // The catalog is mutable in the demo so the disable toggle's refetch shows its
 // effect; the mock answers /api/subagents/overrides by editing these rows.
 const catalogState = structuredClone(subagentCatalogResponse) as {
-  agents: Array<Record<string, unknown> & { name: string; source: string; filePath: string; disabled?: boolean }>;
+  agents: Array<Record<string, unknown> & {
+    name: string;
+    source: string;
+    filePath: string;
+    disabled?: boolean;
+    disabledSource?: { scope: "user" | "project"; via: "override" | "bulk" };
+  }>;
 };
 
 /**
@@ -288,8 +294,14 @@ async function subagentsRoute(request: MockRequest): Promise<Response> {
     const body = await request.json<{ name?: string; disabled?: boolean }>();
     const row = catalogState.agents.find((agent) => agent.name === body.name);
     if (row && typeof body.disabled === "boolean") {
-      if (body.disabled) row.disabled = true;
-      else delete row.disabled;
+      if (body.disabled) {
+        row.disabled = true;
+        // The toggle only ever writes a user-scope named override.
+        row.disabledSource = { scope: "user", via: "override" };
+      } else {
+        delete row.disabled;
+        delete row.disabledSource;
+      }
     }
     return json({ ok: true });
   }

@@ -257,10 +257,16 @@ test("toggles a read-only catalog agent's disabled override through the override
   assert.match(source, /<ConfigSwitch[\s\S]*?checked=\{agent\.disabled === true\}/);
 });
 
-test("locks the disable switch when a project override wins and shows the hint", () => {
-  assert.match(source, /const projectOverrideWins = agent\.disabled === true && agent\.overriddenBy === "project"/);
-  assert.match(source, /disabled=\{saving \|\| projectOverrideWins\}/);
-  assert.match(source, /\{projectOverrideWins && <span className="agents-catalog-note">\{t\("agents\.catalog\.projectOverrideHint"\)\}/);
+test("locks the disable switch only when the user toggle could not undo the disable", () => {
+  assert.match(source, /const disableHint = agent\.disabled === true && agent\.disabledSource/);
+  assert.match(source, /agent\.disabledSource\.via === "bulk"/);
+  assert.match(source, /agents\.catalog\.disableHint\.bulk/);
+  assert.match(source, /agents\.catalog\.disableHint\.projectOverride/);
+  assert.match(source, /const disableSwitchLocked = disableHint !== null/);
+  assert.match(source, /disabled=\{saving \|\| disableSwitchLocked\}/);
+  assert.match(source, /\{disableHint && \(/);
+  assert.doesNotMatch(source, /projectOverrideWins/);
+  assert.doesNotMatch(source, /agents\.catalog\.projectOverrideHint/);
 });
 
 test("ejects a read-only catalog agent through the eject route", () => {
@@ -271,4 +277,10 @@ test("ejects a read-only catalog agent through the eject route", () => {
   assert.match(source, /onEject=\{\(agent, scope, name\) => void ejectCatalogAgent\(agent, scope, name\)\}/);
   assert.match(source, /t\("agents\.catalog\.duplicateShadowHint"\)/);
   assert.match(source, /onClick=\{\(\) => onEject\(agent, duplicateScope, duplicateName\.trim\(\)\)\}/);
+});
+
+test("offers eject only for builtin and package catalog rows", () => {
+  assert.match(source, /function isEjectableSource\(source: AgentCatalogSource\): boolean/);
+  assert.match(source, /source === "builtin" \|\| source === "package"/);
+  assert.match(source, /isEjectableSource\(agent\.source\) && \(/);
 });

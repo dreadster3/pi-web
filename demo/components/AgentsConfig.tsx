@@ -131,6 +131,11 @@ function isWritableScope(scope: SubagentScope): scope is SubagentWritableScope {
   return scope === "global" || scope === "project";
 }
 
+/** pi-subagents' `handleEject` only duplicates bundled builtin and package agents. */
+function isEjectableSource(source: AgentCatalogSource): boolean {
+  return source === "builtin" || source === "package";
+}
+
 function shortenPath(path: string): string {
   return path.replace(/^\/(?:Users|home)\/[^/]+/, "~");
 }
@@ -193,10 +198,18 @@ function CatalogAgentDetail({
   const [duplicating, setDuplicating] = useState(false);
   const [duplicateScope, setDuplicateScope] = useState<SubagentWritableScope>("global");
   const [duplicateName, setDuplicateName] = useState(agent.name);
-  // A row disabled by a project settings override cannot be enabled from the
-  // user-scope toggle (project wins in pi-subagents' disable ladder), so the
-  // switch is locked with the reason as its hint instead of failing silently.
-  const projectOverrideWins = agent.disabled === true && agent.overriddenBy === "project";
+  // A disable the user-scope toggle cannot undo is locked with the reason as
+  // its hint: a bulk `disableBuiltins` wins at either scope, and a project
+  // override outranks the user override the switch would remove. A user-scope
+  // override stays switchable because toggling it off removes that override.
+  const disableHint = agent.disabled === true && agent.disabledSource
+    ? agent.disabledSource.via === "bulk"
+      ? { key: "agents.catalog.disableHint.bulk", scope: agent.disabledSource.scope }
+      : agent.disabledSource.scope === "project"
+        ? { key: "agents.catalog.disableHint.projectOverride", scope: agent.disabledSource.scope }
+        : null
+    : null;
+  const disableSwitchLocked = disableHint !== null;
   const details: Array<[string, ReactNode]> = [
     [t("agents.catalog.aliases"), agent.aliases?.join(", ") ?? t("agents.catalog.none")],
     [t("agents.catalog.model"), agent.model ?? t("agents.inherit")],
@@ -221,7 +234,9 @@ function CatalogAgentDetail({
           )}
           {agent.advertise && <span className="agents-catalog-badge">{t("agents.catalog.advertised")}</span>}
           {agent.executable === false && <span className="agents-catalog-badge is-warning">{t("agents.catalog.unavailable")}</span>}
-          <ConfigButton size="small" onClick={() => setDuplicating((current) => !current)} disabled={saving}>{t("agents.duplicate")}</ConfigButton>
+          {isEjectableSource(agent.source) && (
+            <ConfigButton size="small" onClick={() => setDuplicating((current) => !current)} disabled={saving}>{t("agents.duplicate")}</ConfigButton>
+          )}
         </ConfigDetailActions>
       </ConfigDetailHeader>
       <CatalogDetailField label={t("agents.description")} value={agent.description} />
@@ -233,13 +248,17 @@ function CatalogAgentDetail({
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <ConfigSwitch
               checked={agent.disabled === true}
-              disabled={saving || projectOverrideWins}
+              disabled={saving || disableSwitchLocked}
               label={t("agents.catalog.disabledToggle")}
               onChange={(checked) => onToggleDisabled(agent, checked)}
             />
             <span className="agents-catalog-note">{t("agents.catalog.disabledToggleHelp")}</span>
           </div>
-          {projectOverrideWins && <span className="agents-catalog-note">{t("agents.catalog.projectOverrideHint")}</span>}
+          {disableHint && (
+            <span className="agents-catalog-note">
+              {t(disableHint.key, { scope: t(`agents.scope.${disableHint.scope}`) })}
+            </span>
+          )}
         </div>
       </Field>
       {duplicating && (
