@@ -38,6 +38,7 @@ import {
   ConfigSidebarText,
   ConfigSplitView,
   ConfigStatusDot,
+  ConfigSwitch,
 } from "./SettingsUi";
 import { ModelSelector } from "./ModelSelector";
 
@@ -177,8 +178,25 @@ function CatalogDetailField({ label, value }: { label: string; value: ReactNode 
   );
 }
 
-function CatalogAgentDetail({ agent }: { agent: AgentCatalogAgent }) {
+function CatalogAgentDetail({
+  agent,
+  saving,
+  onToggleDisabled,
+  onEject,
+}: {
+  agent: AgentCatalogAgent;
+  saving: boolean;
+  onToggleDisabled: (agent: AgentCatalogAgent, disabled: boolean) => void;
+  onEject: (agent: AgentCatalogAgent, scope: SubagentWritableScope, name: string) => void;
+}) {
   const { t } = useI18n();
+  const [duplicating, setDuplicating] = useState(false);
+  const [duplicateScope, setDuplicateScope] = useState<SubagentWritableScope>("global");
+  const [duplicateName, setDuplicateName] = useState(agent.name);
+  // A row disabled by a project settings override cannot be enabled from the
+  // user-scope toggle (project wins in pi-subagents' disable ladder), so the
+  // switch is locked with the reason as its hint instead of failing silently.
+  const projectOverrideWins = agent.disabled === true && agent.overriddenBy === "project";
   const details: Array<[string, ReactNode]> = [
     [t("agents.catalog.aliases"), agent.aliases?.join(", ") ?? t("agents.catalog.none")],
     [t("agents.catalog.model"), agent.model ?? t("agents.inherit")],
@@ -203,12 +221,56 @@ function CatalogAgentDetail({ agent }: { agent: AgentCatalogAgent }) {
           )}
           {agent.advertise && <span className="agents-catalog-badge">{t("agents.catalog.advertised")}</span>}
           {agent.executable === false && <span className="agents-catalog-badge is-warning">{t("agents.catalog.unavailable")}</span>}
+          <ConfigButton size="small" onClick={() => setDuplicating((current) => !current)} disabled={saving}>{t("agents.duplicate")}</ConfigButton>
         </ConfigDetailActions>
       </ConfigDetailHeader>
       <CatalogDetailField label={t("agents.description")} value={agent.description} />
       <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", gap: 12 }}>
         {details.map(([label, value]) => <CatalogDetailField key={label} label={label} value={value} />)}
       </div>
+      <Field label={t("agents.catalog.disabledToggle")}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <ConfigSwitch
+              checked={agent.disabled === true}
+              disabled={saving || projectOverrideWins}
+              label={t("agents.catalog.disabledToggle")}
+              onChange={(checked) => onToggleDisabled(agent, checked)}
+            />
+            <span className="agents-catalog-note">{t("agents.catalog.disabledToggleHelp")}</span>
+          </div>
+          {projectOverrideWins && <span className="agents-catalog-note">{t("agents.catalog.projectOverrideHint")}</span>}
+        </div>
+      </Field>
+      {duplicating && (
+        <Field label={t("agents.catalog.duplicateScope")}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 3, padding: 3, border: "1px solid var(--border)", borderRadius: 5, background: "var(--bg-panel)" }}>
+              {(["global", "project"] as const).map((scope) => (
+                <button
+                  key={scope}
+                  type="button"
+                  onClick={() => setDuplicateScope(scope)}
+                  disabled={saving}
+                  style={{ height: 28, border: "none", borderRadius: 4, background: duplicateScope === scope ? "var(--bg-selected)" : "transparent", color: duplicateScope === scope ? "var(--text)" : "var(--text-muted)", cursor: saving ? "default" : "pointer", fontSize: 11, fontWeight: duplicateScope === scope ? 600 : 400 }}
+                >
+                  {t(`agents.scope.${scope}`)}
+                </button>
+              ))}
+            </div>
+            <input aria-label={t("agents.name")} value={duplicateName} disabled={saving} onChange={(event) => setDuplicateName(event.target.value)} style={inputStyle} />
+            <span className="agents-catalog-note">{t("agents.catalog.duplicateShadowHint")}</span>
+            <div style={{ display: "flex", gap: 6 }}>
+              <ConfigButton variant="primary" size="small" disabled={saving || !duplicateName.trim()} onClick={() => onEject(agent, duplicateScope, duplicateName.trim())}>
+                {t("agents.catalog.duplicateAction")}
+              </ConfigButton>
+              <ConfigButton size="small" disabled={saving} onClick={() => setDuplicating(false)}>
+                {t("i18n.cancel")}
+              </ConfigButton>
+            </div>
+          </div>
+        </Field>
+      )}
       <p className="agents-catalog-note">{t("agents.catalog.readOnly")}</p>
     </ConfigDetailStack>
   );
@@ -478,6 +540,55 @@ export function AgentsConfig({
     setError(null);
   };
 
+  /**
+   * Toggle a read-only catalog agent through its user-scope settings override,
+   * then refetch profiles + catalog so the row reflects the new effective state
+   * the disable ladder computes.
+   */
+  const toggleCatalogDisabled = async (agent: AgentCatalogAgent, disabled: boolean) => {
+    setSaving(true);
+    setError(null);
+    const key = catalogKey(agent);
+    try {
+      const response = await fetch("/api/subagents/overrides", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cwd, name: agent.name, disabled }),
+      });
+      const data = await response.json() as { ok?: boolean; error?: string };
+      if (!response.ok || data.error) throw new Error(data.error ?? `HTTP ${response.status}`);
+      await loadProfiles();
+      // loadProfiles clears and may reselect profiles; re-select the catalog
+      // row so the switch the user just flipped stays in view.
+      setSelectedKey(null);
+      setSelectedCatalogKey(key);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  /** pi-subagents `eject`: copy a catalog agent file verbatim into a writable agent dir. */
+  const ejectCatalogAgent = async (agent: AgentCatalogAgent, scope: SubagentWritableScope, name: string) => {
+    setSaving(true);
+    setError(null);
+    try {
+      const response = await fetch("/api/subagents/eject", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cwd, scope, sourcePath: agent.filePath, name }),
+      });
+      const data = await response.json() as { profile?: SubagentProfile; error?: string };
+      if (!response.ok || data.error || !data.profile) throw new Error(data.error ?? `HTTP ${response.status}`);
+      await loadProfiles(profileKey(data.profile));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const save = async () => {
     setSaving(true);
     setError(null);
@@ -652,7 +763,13 @@ export function AgentsConfig({
               {!selected && !selectedCatalog && !creating ? (
                 <ConfigEmptyState>{t("agents.empty")}</ConfigEmptyState>
               ) : selectedCatalog ? (
-                <CatalogAgentDetail agent={selectedCatalog} />
+                <CatalogAgentDetail
+                  key={catalogKey(selectedCatalog)}
+                  agent={selectedCatalog}
+                  saving={saving}
+                  onToggleDisabled={(agent, disabled) => void toggleCatalogDisabled(agent, disabled)}
+                  onEject={(agent, scope, name) => void ejectCatalogAgent(agent, scope, name)}
+                />
               ) : (
                 <ConfigDetailStack>
                   <ConfigDetailHeader>

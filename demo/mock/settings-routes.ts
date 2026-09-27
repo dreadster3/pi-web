@@ -24,6 +24,11 @@ const authState = structuredClone(AUTH_PROVIDERS_RESPONSE);
 let modelsConfig = structuredClone(MODELS_CONFIG);
 const skillsState = structuredClone(skillsResponse);
 const profilesState = structuredClone(subagentProfilesResponse) as { profiles: Array<Record<string, unknown> & { name: string; scope: string }> };
+// The catalog is mutable in the demo so the disable toggle's refetch shows its
+// effect; the mock answers /api/subagents/overrides by editing these rows.
+const catalogState = structuredClone(subagentCatalogResponse) as {
+  agents: Array<Record<string, unknown> & { name: string; source: string; filePath: string; disabled?: boolean }>;
+};
 
 /**
  * Mirrors GET /api/subagents/tools: the builtin 8 plus the `subagent` tool the
@@ -271,12 +276,45 @@ async function pluginsRoute(request: MockRequest): Promise<Response> {
 
 async function subagentsRoute(request: MockRequest): Promise<Response> {
   if (request.segments[2] === "catalog") {
-    if (request.method === "GET") return json(subagentCatalogResponse);
+    if (request.method === "GET") return json(catalogState);
     return error("Method not allowed", 405);
   }
   if (request.segments[2] === "tools") {
     if (request.method === "GET") return json({ tools: SUBAGENT_TOOL_LIST });
     return error("Method not allowed", 405);
+  }
+  if (request.segments[2] === "overrides") {
+    if (request.method !== "PUT") return error("Method not allowed", 405);
+    const body = await request.json<{ name?: string; disabled?: boolean }>();
+    const row = catalogState.agents.find((agent) => agent.name === body.name);
+    if (row && typeof body.disabled === "boolean") {
+      if (body.disabled) row.disabled = true;
+      else delete row.disabled;
+    }
+    return json({ ok: true });
+  }
+  if (request.segments[2] === "eject") {
+    if (request.method !== "POST") return error("Method not allowed", 405);
+    const body = await request.json<{ scope?: string; sourcePath?: string; name?: string }>();
+    const source = catalogState.agents.find((agent) => agent.filePath === body.sourcePath);
+    const name = body.name ?? source?.name ?? "agent-copy";
+    const scope = body.scope ?? "global";
+    const profile = {
+      name,
+      displayName: name,
+      description: source?.description ?? "Ejected agent copy",
+      systemPrompt: "Ejected from a built-in agent.",
+      toolsInherited: true,
+      scope,
+      filePath: scope === "project"
+        ? `/Users/demo/project/.pi/agents/${name}.md`
+        : `/Users/demo/.pi/agent/agents/${name}.md`,
+    };
+    profilesState.profiles = [
+      ...profilesState.profiles.filter((candidate) => !(candidate.name === name && candidate.scope === scope)),
+      profile as (typeof profilesState.profiles)[number],
+    ];
+    return json({ profile });
   }
   if (request.segments[2] !== "profiles") return error("Not found", 404);
   if (request.method === "GET") return json(profilesState);
