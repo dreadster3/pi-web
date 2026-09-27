@@ -51,6 +51,11 @@ export interface AgentCatalogAgent {
   thinking?: string;
   tools?: string[];
   excludeTools?: string[];
+  /**
+   * The trimmed markdown body that follows the frontmatter close delimiter —
+   * the agent's system instructions. Absent when the definition has no body.
+   */
+  prompt?: string;
   advertise?: boolean;
   disabled?: boolean;
   /**
@@ -573,7 +578,7 @@ function parseAgentFile(filePath: string, source: AgentCatalogSource): AgentCata
   } catch {
     return null;
   }
-  const { data } = parseFrontmatter(content);
+  const { data, rest } = parseFrontmatter(content);
   if (!data) return null;
   // pi-subagents skips a definition missing either key, so the catalog does too.
   const name = stringValue(data.name);
@@ -606,6 +611,7 @@ function parseAgentFile(filePath: string, source: AgentCatalogSource): AgentCata
   const displayName = stringValue(data.display_name);
   const model = stringValue(data.model);
   const advertise = booleanValue(data.advertise);
+  const prompt = rest.trim();
 
   return {
     name: runtimeName,
@@ -619,6 +625,7 @@ function parseAgentFile(filePath: string, source: AgentCatalogSource): AgentCata
     ...(thinking ? { thinking } : {}),
     ...(advertise !== undefined ? { advertise } : {}),
     ...(model ? { model } : {}),
+    ...(prompt ? { prompt } : {}),
     ...(runnerCommand && !commandAvailable(runnerCommand) ? { executable: false } : {}),
   };
 }

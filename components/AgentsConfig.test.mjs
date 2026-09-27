@@ -284,3 +284,10 @@ test("offers eject only for builtin and package catalog rows", () => {
   assert.match(source, /source === "builtin" \|\| source === "package"/);
   assert.match(source, /isEjectableSource\(agent\.source\) && \(/);
 });
+
+test("shows a read-only prompt section for catalog rows that carry one", () => {
+  assert.match(source, /\{agent\.prompt && \(/);
+  assert.match(source, /<Section title=\{t\("agents\.section\.prompt"\)\} defaultOpen>[\s\S]*?value=\{agent\.prompt\}/);
+  assert.match(source, /<textarea[\s\S]*?className="agents-system-prompt"[\s\S]*?value=\{agent\.prompt\}[\s\S]*?readOnly[\s\S]*?disabled[\s\S]*?\/>/);
+  assert.match(source, /resize: "none"/);
+});
