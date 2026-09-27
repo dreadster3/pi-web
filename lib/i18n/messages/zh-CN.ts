@@ -152,6 +152,8 @@ export const zhCNLocale: LocalePlugin = {
     "agentSwitcher.current": "当前",
     "agentSwitcher.count": "{count} 个子 Agent",
     "agentSwitcher.runningCount": "{count} 个运行中",
+    "agentSwitcher.showCompleted": "显示已完成",
+    "agentSwitcher.noRunning": "没有运行中的 Agent",
     "agentSwitcher.search": "搜索 Agents",
     "agentSwitcher.noMatches": "没有匹配的 Agent",
     "agentSwitcher.status.starting": "正在启动",

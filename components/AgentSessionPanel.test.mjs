@@ -29,10 +29,46 @@ test("renders as a compact left-positioned dropdown without a centered inner wid
 });
 
 test("shows persisted completion states while live running state takes precedence", () => {
-  assert.match(source, /const status: SubagentSessionStatus = running \|\| progress\?\.status === "running"/);
+  assert.match(source, /return running \|\| progress\?\.status === "running"/);
   assert.match(source, /t\(`agentSwitcher\.status\.\$\{status\}`\)/);
   assert.match(source, /status === "failed"/);
   assert.match(source, /status === "aborted" \|\| status === "interrupted"/);
+});
+
+test("hides terminal rows by default and reveals them with the Show completed toggle", () => {
+  // Default state is `false`: completed/failed/etc. rows are not rendered.
+  assert.match(source, /const \[showCompleted, setShowCompleted\] = useState\(false\)/);
+  assert.match(source, /ACTIVE_SUBAGENT_STATUSES: ReadonlySet<SubagentSessionStatus> = new Set\(\["running", "starting"\]\)/);
+  assert.match(source, /function isActiveSubagentStatus\(status: SubagentSessionStatus\): boolean \{\s*return ACTIVE_SUBAGENT_STATUSES\.has\(status\);/);
+  // Unchecked filters to active statuses; checked shows every matched row.
+  assert.match(source, /const visibleSubagents = showCompleted\s*\? searchMatches\s*: searchMatches\.filter\(\(session\) => isActiveSubagentStatus\(statusOf\(session\)\)\)/);
+  assert.match(source, /checked=\{showCompleted\}/);
+  assert.match(source, /onChange=\{setShowCompleted\}/);
+  assert.match(source, /label=\{t\("agentSwitcher\.showCompleted"\)\}/);
+});
+
+test("composes search with the status filter instead of replacing it", () => {
+  // Search narrows first, then the active-status filter runs over its result,
+  // so both conditions apply at once.
+  assert.match(source, /const searchMatches = normalizedQuery\s*\? sortedSubagents\.filter/);
+  assert.match(source, /const visibleSubagents = showCompleted\s*\? searchMatches\s*: searchMatches\.filter\(\(session\) => isActiveSubagentStatus\(statusOf\(session\)\)\)/);
+});
+
+test("shows a dim empty-state hint that can reveal hidden terminal rows", () => {
+  assert.match(source, /searchMatches\.length === 0 \? t\("agentSwitcher\.noMatches"\) : t\("agentSwitcher\.noRunning"\)/);
+  assert.match(source, /!showCompleted && hiddenTerminalCount > 0/);
+  assert.match(source, /const hiddenTerminalCount = showCompleted\s*\? 0\s*: searchMatches\.filter\(\(session\) => !isActiveSubagentStatus\(statusOf\(session\)\)\)\.length/);
+});
+
+test("derives the filter from the same status inputs as the row badge", () => {
+  // One helper owns the precedence, and both the row badge and the list-level
+  // map call it with the same inputs (running id set + run progress).
+  assert.match(source, /function subagentStatus\(\s*session: SessionInfo,\s*progress: RunProgress \| undefined,\s*running: boolean,/);
+  assert.match(source, /const relation = session\.relation\?\.kind === "subagent" \? session\.relation : null;\s*return running \|\| progress\?\.status === "running"/);
+  assert.match(source, /statuses\.set\(session\.id, subagentStatus\(session, runProgress\.get\(session\.id\), running\)\)/);
+  assert.match(source, /const statusOf = \(session: SessionInfo\): SubagentSessionStatus => subagentStatuses\.get\(session\.id\) \?\? "completed"/);
+  assert.match(source, /status=\{statusOf\(session\)\}/);
+  assert.match(source, /status=\{subagentStatus\(rootSession, undefined, runningSessionIds\.has\(rootSession\.id\)\)\}/);
 });
 
 test("surfaces per-run progress from the subagent-async snapshot while falling back to relation status", () => {
