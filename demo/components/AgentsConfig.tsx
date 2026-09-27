@@ -243,6 +243,20 @@ function CatalogAgentDetail({
       <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", gap: 12 }}>
         {details.map(([label, value]) => <CatalogDetailField key={label} label={label} value={value} />)}
       </div>
+      {agent.prompt && (
+        <Section title={t("agents.section.prompt")} defaultOpen>
+          <Field label={t("agents.prompt")}>
+            <textarea
+              className="agents-system-prompt"
+              aria-label={t("agents.prompt")}
+              value={agent.prompt}
+              readOnly
+              disabled
+              style={{ ...inputStyle, ...disabledInputStyle, height: 195, minHeight: 195, maxHeight: "60vh", padding: 9, overflow: "auto", resize: "none", lineHeight: 1.5 }}
+            />
+          </Field>
+        </Section>
+      )}
       <Field label={t("agents.catalog.disabledToggle")}>
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
