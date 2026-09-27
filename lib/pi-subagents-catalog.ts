@@ -34,6 +34,12 @@ import { parseFrontmatter } from "./frontmatter";
 
 export type AgentCatalogSource = "builtin" | "package" | "user" | "project";
 
+/** Which settings entry disables the effective agent, and whether a named override or the bulk switch did it. */
+export interface AgentCatalogDisabledSource {
+  scope: "user" | "project";
+  via: "override" | "bulk";
+}
+
 export interface AgentCatalogAgent {
   name: string;
   displayName?: string;
@@ -47,6 +53,14 @@ export interface AgentCatalogAgent {
   excludeTools?: string[];
   advertise?: boolean;
   disabled?: boolean;
+  /**
+   * Set with `disabled === true` when a settings entry disabled this agent:
+   * `override` is `subagents.agentOverrides.<name>.disabled`, `bulk` is
+   * `subagents.disableBuiltins`. Absent when nothing disabled it, so the panel
+   * never reads a stale reason. The winning row's value is projected onto every
+   * same-name row, because the winner is the one the runtime dispatches.
+   */
+  disabledSource?: AgentCatalogDisabledSource;
   /** Source of the same-name entry that wins over this one, if any. */
   overriddenBy?: AgentCatalogSource;
   /** Set only when the definition provably cannot run — an external CLI missing from PATH. */
@@ -668,7 +682,11 @@ function readAgentDir(dir: string, source: AgentCatalogSource): AgentCatalogAgen
   return rows;
 }
 
-function applyOverride(row: AgentCatalogAgent, override: Record<string, unknown> | undefined): AgentCatalogAgent {
+function applyOverride(
+  row: AgentCatalogAgent,
+  override: Record<string, unknown> | undefined,
+  scope?: AgentCatalogDisabledSource["scope"],
+): AgentCatalogAgent {
   if (!override) return row;
   const next: AgentCatalogAgent = { ...row };
   const description = stringValue(override.description);
@@ -684,7 +702,11 @@ function applyOverride(row: AgentCatalogAgent, override: Record<string, unknown>
   else if (Array.isArray(override.tools)) next.tools = override.tools.map(String);
   if (override.excludeTools === false) delete next.excludeTools;
   else if (Array.isArray(override.excludeTools)) next.excludeTools = override.excludeTools.map(String);
-  if (typeof override.disabled === "boolean") next.disabled = override.disabled;
+  if (typeof override.disabled === "boolean") {
+    next.disabled = override.disabled;
+    if (override.disabled && scope) next.disabledSource = { scope, via: "override" };
+    else delete next.disabledSource;
+  }
   return next;
 }
 
@@ -738,16 +760,16 @@ function applyBuiltinLadder(
   const projectThinkingConfigured = projectSettings.disableThinking !== undefined;
   const disableThinking = projectThinkingConfigured ? projectSettings.disableThinking === true : userSettings.disableThinking === true;
   if (projectOverride) {
-    return clearBuiltinThinking(applyOverride(next, projectOverride), disableThinking, projectOverride.thinking !== undefined);
+    return clearBuiltinThinking(applyOverride(next, projectOverride, "project"), disableThinking, projectOverride.thinking !== undefined);
   }
   if (projectSettings.disableBuiltins === true) {
-    return clearBuiltinThinking({ ...next, disabled: true }, disableThinking, false);
+    return clearBuiltinThinking({ ...next, disabled: true, disabledSource: { scope: "project", via: "bulk" } }, disableThinking, false);
   }
   if (userOverride) {
-    return clearBuiltinThinking(applyOverride(next, userOverride), disableThinking, !projectThinkingConfigured && userOverride.thinking !== undefined);
+    return clearBuiltinThinking(applyOverride(next, userOverride, "user"), disableThinking, !projectThinkingConfigured && userOverride.thinking !== undefined);
   }
   if (projectSettings.disableBuiltins === undefined && userSettings.disableBuiltins === true) {
-    return clearBuiltinThinking({ ...next, disabled: true }, disableThinking, false);
+    return clearBuiltinThinking({ ...next, disabled: true, disabledSource: { scope: "user", via: "bulk" } }, disableThinking, false);
   }
   return clearBuiltinThinking(next, disableThinking, false);
 }
@@ -793,10 +815,12 @@ export function listAgentCatalog(cwd: string): AgentCatalogAgent[] {
       if (source === "builtin") {
         next = applyBuiltinLadder(row, effectiveDefaults, userSettings, projectSettings);
       } else {
-        // A custom definition merges user then project, and a custom override
-        // never triggers the built-in bulk-disable rules.
-        const override = { ...userSettings.overrides[row.name], ...projectSettings.overrides[row.name] };
-        next = applyOverride(applyDefaults(row, effectiveDefaults), override);
+        // A custom definition applies user then project (project wins), and a
+        // custom override never triggers the built-in bulk-disable rules. The
+        // two calls keep each scope's disable provenance distinguishable.
+        next = applyDefaults(row, effectiveDefaults);
+        if (userSettings.overrides[row.name]) next = applyOverride(next, userSettings.overrides[row.name], "user");
+        if (projectSettings.overrides[row.name]) next = applyOverride(next, projectSettings.overrides[row.name], "project");
       }
       scored.push({ row: next, rank: SOURCE_RANK[source] * 1_000_000 + index });
     });
@@ -806,16 +830,25 @@ export function listAgentCatalog(cwd: string): AgentCatalogAgent[] {
   // name reports which source shadowed it. Same-source collisions (two packages
   // or two user dirs defining one name) count too, so the comparison is by the
   // winning rank, not by the source id.
-  const winners = new Map<string, { rank: number; source: AgentCatalogSource }>();
+  const winners = new Map<string, { rank: number; row: AgentCatalogAgent }>();
   for (const { row, rank } of scored) {
     const current = winners.get(row.name);
-    if (!current || rank > current.rank) winners.set(row.name, { rank, source: row.source });
+    if (!current || rank > current.rank) winners.set(row.name, { rank, row });
   }
 
   return scored
     .map(({ row, rank }) => {
       const winner = winners.get(row.name);
-      return winner && winner.rank > rank ? { ...row, overriddenBy: winner.source } : row;
+      if (!winner || winner.rank === rank) return row;
+      // A shadowed row is display-only; the winner's effective state is what
+      // the runtime dispatches, so project both the disable flag and its reason
+      // and never leave the panel reading a loser's stale provenance.
+      return {
+        ...row,
+        overriddenBy: winner.row.source,
+        disabled: winner.row.disabled,
+        disabledSource: winner.row.disabledSource,
+      };
     })
     .sort((a, b) => a.name.localeCompare(b.name) || SOURCE_RANK[a.source] - SOURCE_RANK[b.source]);
 }

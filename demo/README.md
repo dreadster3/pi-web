@@ -62,7 +62,10 @@ answers that route from `mock/captured/subagent-catalog.json` with a subset of
 the real pi-subagents built-ins, so the demo shows the catalog without the
 package installed. The editor's tool checkboxes come from
 `GET /api/subagents/tools`, which the mock answers with the builtin tools plus
-the `subagent` extension tool.
+the `subagent` extension tool. A catalog row's disable switch and Duplicate
+button work in the demo too: the mock answers `PUT /api/subagents/overrides` and
+`POST /api/subagents/eject` by editing the in-memory catalog and profile lists
+so the refetch shows the result.
 
 To pick up UI changes from the main project, copy the updated files over and
 re-apply the changes above (search for `demo` / `@/mock` in those files).

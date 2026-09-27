@@ -1,10 +1,10 @@
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { dump as stringifyYaml } from "js-yaml";
-import { existsSync, mkdirSync, readdirSync, readFileSync, unlinkSync } from "fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, unlinkSync } from "fs";
 import { basename, dirname, join, resolve } from "path";
 import { parseFrontmatter } from "./frontmatter";
-import { findConfiguredProjectRoot } from "./pi-subagents-catalog";
+import { findConfiguredProjectRoot, type AgentCatalogSource } from "./pi-subagents-catalog";
 import { writePrivateFileAtomicSync } from "./atomic-file";
 import { isExistingPathWithinRoots } from "./path-security";
 import type { SessionEntry, SubagentSessionStatus } from "./types";
@@ -668,6 +668,68 @@ export function deleteSubagentProfile(cwd: string, scope: SubagentWritableScope,
   const safeName = assertProfileName(name);
   const filePath = join(assertWritableProfileDirectory(cwd, scope), `${safeName}.md`);
   if (existsSync(filePath)) unlinkSync(filePath);
+}
+
+/**
+ * A writable profile file already claims this name in the scope, so an eject
+ * would overwrite it. Raised as its own type so the route can answer 409.
+ */
+export class SubagentProfileExistsError extends Error {
+  constructor(readonly filePath: string) {
+    super("An agent file already exists at this location");
+    this.name = "SubagentProfileExistsError";
+  }
+}
+
+/**
+ * pi-subagents' `eject` only duplicates a bundled builtin or package agent; a
+ * user/project row is already an editable file, so duplicating it would just
+ * create a same-name shadow rather than exposing a bundled definition.
+ */
+const EJECTABLE_SOURCES: readonly AgentCatalogSource[] = ["builtin", "package"];
+
+/**
+ * pi-subagents' `eject`: copy a bundled builtin or package agent file verbatim
+ * into a writable agent directory as an editable file that shadows the source.
+ * The bytes are copied unchanged; only the file name is normalized, so the
+ * copy stays in the dialect the source was written in. A same-named file in the
+ * target scope conflicts instead of overwriting (409 at the route).
+ */
+export function ejectSubagentProfile(
+  cwd: string,
+  scope: SubagentWritableScope,
+  sourcePath: string,
+  name: string,
+  source: AgentCatalogSource,
+): SubagentProfile {
+  if (!EJECTABLE_SOURCES.includes(source)) {
+    throw new Error("Only built-in and package agents can be duplicated");
+  }
+  const safeName = assertProfileName(name);
+  if (!existsSync(sourcePath) || !statSync(sourcePath).isFile()) {
+    throw new Error("Source agent file not found");
+  }
+  const contents = readFileSync(sourcePath, "utf8");
+  const dir = assertWritableProfileDirectory(cwd, scope);
+  const filePath = join(dir, `${safeName}.md`);
+  if (existsSync(filePath)) throw new SubagentProfileExistsError(filePath);
+  mkdirSync(dir, { recursive: true });
+  if (scope === "project" && !isProjectProfilePathAllowed(projectRootFor(cwd), dir)) {
+    throw new Error("Agent profile directory is outside the project root");
+  }
+  writePrivateFileAtomicSync(filePath, contents);
+  const profile = parseProfileFile(filePath, scope);
+  if (!profile) {
+    // The copy would shadow the source yet stay invisible to the editor, so
+    // remove it before reporting the failure.
+    try {
+      unlinkSync(filePath);
+    } catch {
+      // Best effort: a file that cannot be removed still reports the parse failure.
+    }
+    throw new Error("Copied agent file could not be parsed as a profile");
+  }
+  return profile;
 }
 
 export function saveProjectSubagentProfile(cwd: string, profile: Omit<SubagentProfile, "scope" | "filePath">): SubagentProfile {

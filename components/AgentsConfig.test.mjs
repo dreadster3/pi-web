@@ -197,7 +197,8 @@ test("renders read-only catalog rows only for definitions the editor cannot edit
   assert.match(source, /const editablePaths = new Set\(profiles\.map\(\(profile\) => profile\.filePath\)\.filter\(Boolean\)\)/);
   assert.match(source, /\["builtin", "package", "user", "project"\] as const/);
   assert.match(source, /t\(sourceLabelKey\(source\)\)/);
-  assert.match(source, /<CatalogAgentDetail agent=\{selectedCatalog\} \/>/);
+  assert.match(source, /<CatalogAgentDetail/);
+  assert.match(source, /agent=\{selectedCatalog\}/);
 });
 
 test("shows aliases, model, thinking, and disabled/shadowed state for catalog rows", () => {
@@ -244,4 +245,42 @@ test("resets the raw entry inputs whenever the edited profile changes", () => {
 test("renders the allowNestedSubagents toggle with a translated label", () => {
   assert.match(source, /label=\{t\("agents\.allowNestedSubagents"\)\}/);
   assert.match(source, /checked=\{draft\.allowNestedSubagents === true\}/);
+});
+
+test("toggles a read-only catalog agent's disabled override through the overrides route", () => {
+  assert.match(source, /const toggleCatalogDisabled = async \(agent: AgentCatalogAgent, disabled: boolean\) =>/);
+  assert.match(source, /fetch\("\/api\/subagents\/overrides", \{/);
+  assert.match(source, /JSON\.stringify\(\{ cwd, name: agent\.name, disabled \}\)/);
+  assert.match(source, /method: "PUT"/);
+  assert.match(source, /await loadProfiles\(\)/);
+  assert.match(source, /onToggleDisabled=\{\(agent, disabled\) => void toggleCatalogDisabled\(agent, disabled\)\}/);
+  assert.match(source, /<ConfigSwitch[\s\S]*?checked=\{agent\.disabled === true\}/);
+});
+
+test("locks the disable switch only when the user toggle could not undo the disable", () => {
+  assert.match(source, /const disableHint = agent\.disabled === true && agent\.disabledSource/);
+  assert.match(source, /agent\.disabledSource\.via === "bulk"/);
+  assert.match(source, /agents\.catalog\.disableHint\.bulk/);
+  assert.match(source, /agents\.catalog\.disableHint\.projectOverride/);
+  assert.match(source, /const disableSwitchLocked = disableHint !== null/);
+  assert.match(source, /disabled=\{saving \|\| disableSwitchLocked\}/);
+  assert.match(source, /\{disableHint && \(/);
+  assert.doesNotMatch(source, /projectOverrideWins/);
+  assert.doesNotMatch(source, /agents\.catalog\.projectOverrideHint/);
+});
+
+test("ejects a read-only catalog agent through the eject route", () => {
+  assert.match(source, /const ejectCatalogAgent = async \(agent: AgentCatalogAgent, scope: SubagentWritableScope, name: string\) =>/);
+  assert.match(source, /fetch\("\/api\/subagents\/eject", \{/);
+  assert.match(source, /JSON\.stringify\(\{ cwd, scope, sourcePath: agent\.filePath, name \}\)/);
+  assert.match(source, /await loadProfiles\(profileKey\(data\.profile\)\)/);
+  assert.match(source, /onEject=\{\(agent, scope, name\) => void ejectCatalogAgent\(agent, scope, name\)\}/);
+  assert.match(source, /t\("agents\.catalog\.duplicateShadowHint"\)/);
+  assert.match(source, /onClick=\{\(\) => onEject\(agent, duplicateScope, duplicateName\.trim\(\)\)\}/);
+});
+
+test("offers eject only for builtin and package catalog rows", () => {
+  assert.match(source, /function isEjectableSource\(source: AgentCatalogSource\): boolean/);
+  assert.match(source, /source === "builtin" \|\| source === "package"/);
+  assert.match(source, /isEjectableSource\(agent\.source\) && \(/);
 });

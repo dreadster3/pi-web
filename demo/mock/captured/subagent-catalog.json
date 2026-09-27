@@ -12,7 +12,9 @@
    "description": "Lightweight subagent that inherits the parent model with no default reads",
    "source": "builtin",
    "filePath": "/Users/demo/.pi/agent/npm/node_modules/pi-subagents/agents/delegate.md",
-   "tools": ["read", "grep", "find", "ls", "bash", "edit", "write", "contact_supervisor"]
+   "tools": ["read", "grep", "find", "ls", "bash", "edit", "write", "contact_supervisor"],
+   "disabled": true,
+   "disabledSource": { "scope": "user", "via": "bulk" }
   },
   {
    "name": "evidence-auditor",
@@ -20,7 +22,9 @@
    "source": "builtin",
    "filePath": "/Users/demo/.pi/agent/npm/node_modules/pi-subagents/agents/evidence-auditor.md",
    "tools": ["read", "web_search", "fetch_content", "get_search_content", "source_check"],
-   "thinking": "high"
+   "thinking": "high",
+   "disabled": true,
+   "disabledSource": { "scope": "user", "via": "override" }
   },
   {
    "name": "oracle",
@@ -29,7 +33,9 @@
    "filePath": "/Users/demo/.pi/agent/npm/node_modules/pi-subagents/agents/oracle.md",
    "aliases": ["advisor"],
    "tools": ["read", "grep", "find", "ls", "bash"],
-   "thinking": "high"
+   "thinking": "high",
+   "disabled": true,
+   "disabledSource": { "scope": "project", "via": "override" }
   },
   {
    "name": "researcher",
