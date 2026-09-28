@@ -252,7 +252,8 @@ function PathLabel({ text, style }: { text: string; style?: CSSProperties }) {
 
 const DROPDOWN_ANIMATION_MS = 140;
 
-/** Section label inside the worktree dropdown (WORKTREES / LOCAL BRANCHES). */
+/** Section label for the LOCAL BRANCHES header inside the worktree dropdown; the
+ *  worktree rows above it deliberately render no header. */
 const wtSectionLabelStyle: CSSProperties = {
   padding: "6px 10px 4px",
   fontSize: 10,
@@ -422,6 +423,8 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   const [wtNewBranch, setWtNewBranch] = useState("");
   const [wtError, setWtError] = useState<string | null>(null);
   const [wtBusy, setWtBusy] = useState(false);
+  // Which branch row is waiting on `worktree add` (null while idle).
+  const [wtBusyBranch, setWtBusyBranch] = useState<string | null>(null);
   const [wtConfirmRemove, setWtConfirmRemove] = useState<string | null>(null);
   const [worktreeLoadingCwd, setWorktreeLoadingCwd] = useState<string | null>(null);
   const wtDropdownRef = useRef<HTMLDivElement>(null);
@@ -939,6 +942,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     const target = branch.trim();
     if (!target || wtBusy || !worktreeState) return;
     setWtBusy(true);
+    setWtBusyBranch(target);
     setWtError(null);
     try {
       const res = await fetch("/api/worktrees", {
@@ -970,6 +974,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       setWtError(e instanceof Error ? e.message : String(e));
     } finally {
       setWtBusy(false);
+      setWtBusyBranch(null);
     }
   }, [wtBusy, worktreeState]);
 
@@ -1444,12 +1449,12 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
             project share the same list anyway. */}
         {!sessionSearchOpen && showWorktreeSwitcher && (() => {
           if (!worktreeState) return null;
-          const showWtFilter = worktreeState.worktrees.length >= 8;
+          const showWtFilter = worktreeState.worktrees.length + worktreeState.branches.length >= 8;
           const visibleWorktrees = showWtFilter && wtFilter.trim()
             ? worktreeState.worktrees.filter((w) =>
                 (w.branch ?? displayCwd(w.path, homeDir)).toLowerCase().includes(wtFilter.trim().toLowerCase()))
             : worktreeState.worktrees;
-          const visibleBranches = wtFilter.trim()
+          const visibleBranches = showWtFilter && wtFilter.trim()
             ? worktreeState.branches.filter((branch) =>
                 branch.toLowerCase().includes(wtFilter.trim().toLowerCase()))
             : worktreeState.branches;
@@ -1679,7 +1684,9 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                                 <span style={{ width: 10, flexShrink: 0 }} />
                               )}
                               <PathLabel text={branch} style={{ flex: 1 }} />
-                              {!worktreeForBranch && (
+                              {wtBusyBranch === branch ? (
+                                <span style={{ flexShrink: 0, color: "var(--text-dim)", fontSize: 10 }}>{t("sidebar.creating")}</span>
+                              ) : !worktreeForBranch && (
                                 <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round" style={{ flexShrink: 0, color: "var(--text-dim)" }}>
                                   <line x1="5" y1="1" x2="5" y2="9" />
                                   <line x1="1" y1="5" x2="9" y2="5" />

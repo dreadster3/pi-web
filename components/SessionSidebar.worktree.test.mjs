@@ -31,7 +31,14 @@ test("lists local branches for quick switching next to the worktrees", () => {
   // The branch list honors the worktree filter, and creation is one shared flow.
   assert.match(
     source,
-    /const visibleBranches = wtFilter\.trim\(\)[\s\S]*?worktreeState\.branches\.filter/,
+    /const visibleBranches = showWtFilter && wtFilter\.trim\(\)[\s\S]*?worktreeState\.branches\.filter/,
+  );
+  // The filter appears once the two sections together get long, and both
+  // sections are gated on it so an unmounting input cannot leave the branch
+  // list filtered by an invisible value.
+  assert.match(
+    source,
+    /const showWtFilter = worktreeState\.worktrees\.length \+ worktreeState\.branches\.length >= 8/,
   );
   assert.match(source, /const handleCreateWorktree = useCallback\(\s*\(\) => handleUseBranch\(wtNewBranch\)/);
 });
