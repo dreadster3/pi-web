@@ -25,6 +25,14 @@ Expected:
 
 ## 2. Publish to npm
 
+For the **first publish** of the package (`0.0.1`), publish directly — `npm version patch` would skip to `0.0.2`:
+
+```bash
+npm run build && npm pack --dry-run && npm publish --access public
+```
+
+For every subsequent release:
+
 ```bash
 npm run release
 ```
@@ -39,6 +47,8 @@ Notes:
 
 - This bumps `package.json` and `package-lock.json`.
 - It intentionally runs a production build. Do not run `next build` during normal development; release work is the exception.
+- Before publishing, `npm pack --dry-run` prints the tarball contents; verify that `bin/`, `.next/`, `public/` are present and that `demo/`, `docs/`, `e2e/`, and `public/sw.test.mjs` are absent.
+- Provenance is not enabled in `publishConfig`; publish locally without it. If publishing is later moved to GitHub Actions, configure a Trusted Publisher and `permissions: id-token: write` there instead — provenance is generated automatically in that setup.
 - If `npm view @dreadster3/pi-web version` briefly shows the previous version, check the exact version instead:
 
 ```bash

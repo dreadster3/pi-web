@@ -12,8 +12,7 @@
   },
   "license": "MIT",
   "publishConfig": {
-    "access": "public",
-    "provenance": true
+    "access": "public"
   },
   "engines": {
     "node": ">=22.19.0"
@@ -28,7 +27,6 @@
     "!.next/dev",
     "!.next/**/*.js.map",
     "public",
-    "!public/sw.test.mjs",
     "next.config.ts",
     "package.json"
   ],
