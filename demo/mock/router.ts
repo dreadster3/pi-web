@@ -170,7 +170,7 @@ async function worktreesRoute(request: MockRequest): Promise<Response> {
   const cwd = request.query("cwd");
   const root = projectRoot(cwd);
   if (!root) return error("Access denied", 403);
-  if (root === SCRATCH_ROOT) return json({ projectRoot: root, projectKey: root, isGit: false, isTopLevel: true, currentWorktreePath: root, worktrees: [] });
+  if (root === SCRATCH_ROOT) return json({ projectRoot: root, projectKey: root, isGit: false, isTopLevel: true, currentWorktreePath: root, worktrees: [], branches: [] });
   return json({
     projectRoot: PROJECT_ROOT,
     projectKey: PROJECT_ROOT,
@@ -181,6 +181,9 @@ async function worktreesRoute(request: MockRequest): Promise<Response> {
       { path: PROJECT_ROOT, branch: "main", isMain: true },
       { path: WORKTREE_ROOT, branch: WORKTREE_BRANCH, isMain: false },
     ],
+    // Local branches the switcher offers; WORKTREE_BRANCH already has a
+    // checkout, so clicking it selects that worktree instead of creating one.
+    branches: ["feat/dark-mode", WORKTREE_BRANCH, "fix/sidebar-scroll", "main"].sort(),
   });
 }
 

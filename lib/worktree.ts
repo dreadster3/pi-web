@@ -232,6 +232,13 @@ function sanitizeBranchForDir(branch: string): string {
   return branch.replace(/[\/\\:*?"<>|\s]+/g, "-").replace(/^-+|-+$/g, "");
 }
 
+/** Local branches of the repo, alphabetically (git's refname order).
+ *  Throws for non-git dirs, like listWorktrees(). */
+export async function listLocalBranches(cwd: string): Promise<string[]> {
+  const out = await git(cwd, ["for-each-ref", "refs/heads", "--sort=refname", "--format=%(refname:short)"]);
+  return out ? out.split("\n").map((line) => line.trim()).filter(Boolean) : [];
+}
+
 export async function addWorktree(cwd: string, branch: string): Promise<{ path: string; branch: string }> {
   const trimmed = branch.trim();
   if (!trimmed) throw new Error("Branch name is required");

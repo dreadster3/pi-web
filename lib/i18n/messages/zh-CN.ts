@@ -302,6 +302,7 @@ export const zhCNLocale: LocalePlugin = {
     "sidebar.forceRemoveCheckout": "存在未提交的更改。强制移除 checkout？",
     "sidebar.force": "强制移除",
     "sidebar.createWorktreeTitle": "为分支创建 worktree checkout",
+    "sidebar.localBranches": "本地分支",
     "sidebar.newWorktree": "新建 worktree…",
     "sidebar.branchName": "分支名称",
     "sidebar.creating": "创建中…",
