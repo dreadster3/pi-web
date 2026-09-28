@@ -380,6 +380,42 @@
   white-space: nowrap;
 }
 
+/* Read-only rows for agent definitions the profile editor does not own. */
+.agents-catalog-badge {
+  flex: 0 0 auto;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: rgba(120, 120, 120, 0.12);
+  color: var(--text-dim);
+  font-size: 10px;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+.agents-catalog-badge.is-warning {
+  background: rgba(239, 68, 68, 0.12);
+  color: rgba(239, 68, 68, 0.85);
+}
+
+.agents-catalog-value {
+  min-height: 34px;
+  padding: 8px 9px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg-panel);
+  color: var(--text-dim);
+  font-size: 12px;
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.agents-catalog-note {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
 .config-sidebar-message {
   padding: 10px 8px;
   color: var(--text-muted);

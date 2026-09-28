@@ -186,3 +186,42 @@ export const extendSubagentSession: SessionScript = {
     },
   ],
 };
+
+export const extendPiSubagentSession: SessionScript = {
+  id: SESSION_IDS.piSubagent,
+  cwd: PROJECT_ROOT,
+  startedMinutesAgo: STARTED,
+  // Real pi-subagents layout: the child transcript lives one directory deeper
+  // than the parent file, under a directory named after the parent's basename.
+  nestedUnderParentId: SESSION_IDS.extend,
+  name: `subagent-scout-019d7b54-9b2a-7e79-c3d4-8c9d0e1f2a18-1`,
+  relation: {
+    kind: "subagent",
+    parentSessionId: SESSION_IDS.extend,
+    profile: "scout",
+    description: "scout: Trace the running-session poller",
+    status: "running",
+    engine: "pi-subagents",
+    runId: "019d7b54-9b2a-7e79-c3d4-8c9d0e1f2a18",
+    stepRunId: "step:0",
+  },
+  steps: [
+    { kind: "model", provider: "openai-codex", modelId: "gpt-5.6-luna" },
+    { kind: "thinking", level: "medium" },
+    { kind: "tools", tools: ["read", "grep", "find", "ls"] },
+    { kind: "user", gapMinutes: 0.05, text: TASK },
+    {
+      kind: "assistant",
+      rounds: [
+        {
+          seconds: 3,
+          tools: [{ name: "grep", args: { pattern: "RUNNING_SESSIONS_POLL_MS|/api/agent/running", path: "." }, result: GREP_OUTPUT }],
+        },
+        {
+          seconds: 5,
+          tools: [{ name: "read", args: { path: "components/SessionSidebar.tsx" }, result: { readFile: "components/SessionSidebar.tsx", anchor: "const poll = async () =>", anchorLinesBefore: 10, limit: 58 } }],
+        },
+      ],
+    },
+  ],
+};

@@ -28,6 +28,7 @@ import {
 import { readSessionToolSelectionFromEntries } from "./sessions/tool-selection";
 import { composeReply, type ReplyPlan } from "./replies";
 import { runShellCommand } from "./shell";
+import { SUBAGENT_ASYNC_SNAPSHOT_WIDGET } from "./sessions/subagent-widget";
 
 // ---------------------------------------------------------------------------
 // Event streams
@@ -131,7 +132,12 @@ export async function agentState(session: MockSession) {
     systemPrompt: await systemPromptFor(session),
     thinkingLevel: live.thinkingLevel,
     extensionStatuses: [],
-    extensionWidgets: [],
+    // pi-subagents' live run widget, captured from a real session. It is empty
+    // for the sessions that never delegated. The Agents panel reads its
+    // `subagent-async` line to show current tool / turns / tools.
+    extensionWidgets: SUBAGENT_ASYNC_SNAPSHOT_WIDGET[session.id]
+      ? [{ key: "subagent-async", lines: [SUBAGENT_ASYNC_SNAPSHOT_WIDGET[session.id]], placement: "aboveEditor" as const }]
+      : [],
   };
 }
 

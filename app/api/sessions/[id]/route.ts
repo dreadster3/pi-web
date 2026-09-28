@@ -1,11 +1,14 @@
 import { NextResponse } from "next/server";
-import { existsSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "fs";
-import { dirname, join } from "path";
+import { existsSync, readdirSync, readFileSync, rmdirSync, rmSync, statSync, unlinkSync, writeFileSync } from "fs";
+import { dirname, join, resolve as resolvePath } from "path";
 import {
   attachSessionProjectInfo,
+  getAgentDir,
   listAllSessions,
   mergeSessionLists,
   openSessionManager,
+  piSubagentChildRootDir,
+  isPiSubagentChildSessionPath,
   resolveSessionPath,
   resolveSessionIdByPath,
   invalidateSessionPathCache,
@@ -353,9 +356,42 @@ export async function DELETE(
       invalidateSessionPathCache(deletedId);
       invalidateSessionManagerCache(deletedPath);
     }
+    // Deleting a top-level session also removes the pi-subagents child tree kept
+    // under `<parentBase>/`. That tree is not part of the subagent relation graph
+    // (foreground children carry no `pi-web:subagent` metadata), so the id-based
+    // cascade above never reaches it.
+    const childRoot = piSubagentChildRootDir(filePath);
+    if (childRoot) {
+      try {
+        rmSync(childRoot, { recursive: true, force: true });
+      } catch { /* child tree already gone or unreadable */ }
+    }
+    // A deleted child leaves its `run-N/` and `<childUuid>/` directories empty.
+    // Removing them keeps a later `findSessionPathById` walk from descending a
+    // dead subtree; failure is harmless because the session file is already gone.
+    if (isPiSubagentChildSessionPath(filePath)) pruneEmptySessionDirs(dir);
     invalidateSessionListCache();
     return NextResponse.json({ ok: true });
   } catch (error) {
     return NextResponse.json({ error: String(error) }, { status: 500 });
+  }
+}
+
+/**
+ * Remove now-empty directories up the child's own tree, stopping at the first
+ * non-empty one and never above the project directory (which holds the parent
+ * session file and every sibling session).
+ */
+function pruneEmptySessionDirs(fromDir: string): void {
+  const sessionsDir = resolvePath(join(getAgentDir(), "sessions"));
+  let current = fromDir;
+  while (current !== sessionsDir && dirname(current) !== sessionsDir) {
+    try {
+      if (readdirSync(current).length > 0) return;
+      rmdirSync(current);
+    } catch {
+      return;
+    }
+    current = dirname(current);
   }
 }
