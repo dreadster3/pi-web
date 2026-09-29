@@ -157,7 +157,7 @@ html[data-theme="mocha"],
   --user-bg: #2a2a3f;
   --assistant-bg: #1e1e2e;
   --tool-bg: #181825;
-  --bg-subtle: rgba(203,166,247,0.05);
+  --bg-subtle: rgba(203,166,247,0.04);
 }
 
 /* WebKit reports dvh/innerHeight without the status-bar strip for installed

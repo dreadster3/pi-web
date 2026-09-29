@@ -128,7 +128,7 @@ try {
     await page.keyboard.press("End");
     await page.keyboard.press("ArrowUp");
     await page.keyboard.press("Enter");
-    await expectTheme("pine");
+    await expectTheme("mocha");
     await openThemeMenu();
     await page.screenshot({ path: `${artifacts}/menu-${width}.png`, animations: "disabled" });
     await page.evaluate(() => {
