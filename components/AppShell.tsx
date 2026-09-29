@@ -55,7 +55,7 @@ import {
   SIDEBAR_MIN_WIDTH,
 } from "@/lib/panel-layout";
 import type { BlockingExtensionUiRequest, SessionInfo, SessionTreeNode } from "@/lib/types";
-import type { PiSubagentSnapshotNode } from "@/lib/pi-subagents-snapshot";
+import { isPiSubagentRunTerminal, type PiSubagentSnapshotNode } from "@/lib/pi-subagents-snapshot";
 import type { ProjectTrustStatus } from "@/lib/api-types";
 import type { ChatInputHandle } from "./ChatInput";
 import type { SessionStatsInfo } from "@/lib/pi-types";
@@ -170,6 +170,24 @@ export function AppShell() {
   );
   const [initialCwdError, setInitialCwdError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
+  // A subagent session spawned mid-turn is not in the sidebar's list yet, so the
+  // Agents panel has no row for its live run and falls back to a stale family.
+  // Refetch the list once per newly appearing non-terminal run id so that row
+  // arrives and badges Running, which is what makes the count and the filter
+  // agree. Ids are remembered, so this is one bump per id — no timers, no loop.
+  // Step children are skipped: their ids (`step:0`) are session-less placeholders
+  // that the run they belong to already covers.
+  const refreshedSubagentRunIdsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    let appearing = false;
+    for (const run of subagentRuns) {
+      if (run.kind === "step") continue;
+      if (isPiSubagentRunTerminal(run.state) || refreshedSubagentRunIdsRef.current.has(run.id)) continue;
+      refreshedSubagentRunIdsRef.current.add(run.id);
+      appearing = true;
+    }
+    if (appearing) setRefreshKey((k) => k + 1);
+  }, [subagentRuns]);
   const [sessionKey, setSessionKey] = useState(0);
   const sessionScrollPositionsRef = useRef(new Map<string, ChatScrollPosition>());
   const handleSessionScrollPositionChange = useCallback((sessionId: string, position: ChatScrollPosition) => {
