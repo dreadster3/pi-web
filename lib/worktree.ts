@@ -307,6 +307,41 @@ export async function removeWorktree(cwd: string, worktreePath: string, force = 
   invalidateProjectCache();
 }
 
+/** Delete a local branch. A branch checked out in any worktree cannot be
+ *  deleted at all; unmerged commits need force (git's -d → -D retry). */
+export async function deleteBranch(cwd: string, branch: string, force = false): Promise<void> {
+  const target = branch.trim();
+  if (!target) throw new Error("Branch name is required");
+
+  const repoRoot = await getRepoRoot(cwd);
+  try {
+    await git(repoRoot, ["rev-parse", "--verify", "--quiet", `refs/heads/${target}`]);
+  } catch {
+    throw new Error(`Branch not found: ${target}`);
+  }
+
+  // A branch name is not a path — compare it exactly. Any worktree holding the
+  // branch (including the current one) blocks deletion.
+  const holder = (await listWorktrees(repoRoot)).find((worktree) => worktree.branch === target);
+  if (holder) {
+    throw new Error(`Branch ${target} is checked out at ${holder.path} (remove that worktree first)`);
+  }
+
+  try {
+    await git(repoRoot, ["branch", "-d", "--", target]);
+  } catch (error) {
+    const message = extractGitError(error);
+    // LC_ALL=C is pinned in git(), so this text is stable: git refuses -d when
+    // the branch has commits HEAD cannot reach.
+    if (!force || !/not fully merged/i.test(message)) throw new Error(message);
+    try {
+      await git(repoRoot, ["branch", "-D", "--", target]);
+    } catch (forceError) {
+      throw new Error(extractGitError(forceError));
+    }
+  }
+}
+
 function extractGitError(error: unknown): string {
   const stderr = (error as { stderr?: string }).stderr;
   if (typeof stderr === "string" && stderr.trim()) return stderr.trim();

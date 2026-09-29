@@ -42,3 +42,40 @@ test("lists local branches for quick switching next to the worktrees", () => {
   );
   assert.match(source, /const handleCreateWorktree = useCallback\(\s*\(\) => handleUseBranch\(wtNewBranch\)/);
 });
+
+test("deletes an unheld local branch from the dropdown behind a confirm row", () => {
+  // The row became the worktree-row shape: a select/create button plus a
+  // bin button that only appears for branches no worktree holds.
+  assert.match(
+    source,
+    /className="wt-row"[\s\S]*?\{!worktreeForBranch && !wtBusy && \(/,
+  );
+  assert.match(
+    source,
+    /onClick=\{\(\) => \{ setWtConfirmDeleteBranch\(branch\); setWtDeleteUnmerged\(false\); \}\}\n\s+title=\{t\("sidebar\.deleteBranchTitle", \{ branch \}\)\}/,
+  );
+  // Confirm row mirrors the worktree force-remove row; the first pass asks
+  // before deleting, the second (unmerged) pass is the force retry.
+  assert.match(source, /const \[wtConfirmDeleteBranch, setWtConfirmDeleteBranch\] = useState<string \| null>\(null\)/);
+  assert.match(
+    source,
+    /if \(wtConfirmDeleteBranch === branch\) \{[\s\S]*?wtDeleteUnmerged \? t\("sidebar\.confirmForceDeleteBranch"\) : t\("sidebar\.confirmDeleteBranch"\)[\s\S]*?onClick=\{\(\) => void handleDeleteBranch\(branch, wtDeleteUnmerged\)\}/,
+  );
+  // API call: shared wtBusy gate, unmerged 409 arms the force retry, success
+  // refreshes the list without closing the dropdown.
+  assert.match(
+    source,
+    /const handleDeleteBranch = useCallback\(async \(branch: string, force: boolean\) => \{[\s\S]*?if \(!worktreeState \|\| wtBusy\) return;[\s\S]*?fetch\("\/api\/branches", \{[\s\S]*?method: "DELETE"[\s\S]*?branch, force \}\),/,
+  );
+  assert.match(
+    source,
+    /if \(data\.unmerged && !force\) \{[\s\S]*?setWtConfirmDeleteBranch\(branch\);[\s\S]*?setWtDeleteUnmerged\(true\);[\s\S]*?setWtRefreshKey\(\(k\) => k \+ 1\);/,
+  );
+  assert.doesNotMatch(source, /handleDeleteBranch[\s\S]{0,600}?setWtDropdownOpen\(false\)/);
+  // Success keeps the dropdown open, matching worktree removal.
+  const deleteBody = source.match(
+    /const handleDeleteBranch = useCallback\([\s\S]*?\n  \}, \[worktreeState, wtBusy\]\);/,
+  )?.[0] ?? "";
+  assert.ok(deleteBody.includes("setWtRefreshKey((k) => k + 1)"));
+  assert.ok(!deleteBody.includes("setWtDropdownOpen"));
+});

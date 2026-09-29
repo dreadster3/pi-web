@@ -187,6 +187,11 @@ async function worktreesRoute(request: MockRequest): Promise<Response> {
   });
 }
 
+async function branchesRoute(request: MockRequest): Promise<Response> {
+  if (request.method !== "DELETE") return error("Not found", 404);
+  return error(demoOnlyMessage(), 501);
+}
+
 async function cwdRoute(request: MockRequest): Promise<Response> {
   const [, , action] = request.segments;
   if (action === "validate") {
@@ -231,6 +236,7 @@ const ROUTES: Record<string, Handler> = {
   files: filesRoute,
   "file-index": fileIndexRoute,
   worktrees: worktreesRoute,
+  branches: branchesRoute,
   cwd: cwdRoute,
   home: () => json({ home: HOME }),
   "default-cwd": () => json({ cwd: SCRATCH_ROOT }),
