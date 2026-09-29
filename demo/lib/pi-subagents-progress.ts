@@ -81,13 +81,17 @@ export function buildRunProgress(
     ));
     if (row) claim(node, row);
   }
-  // A nested run the package lifts back to the top level (`liveRoots`) carries
-  // the child run's own id, and the row records that id as `stepRunId` beside
-  // the outer `runId`, so the qualified join above cannot see it. Only a run
-  // node may join this way: the `step:<n>` placeholder repeats in every run and
-  // matching it without an owning run is exactly the mis-join this fixes.
+  // A nested run the package lifts back to the top level (`liveRoots`) surfaces
+  // as a kind "subagent"/"workflow" run node whose own id is the child run id
+  // the row records as `stepRunId` beside the outer `runId`, so the qualified
+  // join above cannot see it. Only run nodes may join this way: the `step:<n>`
+  // placeholder repeats in every run, and `host-step` children carry
+  // author-supplied monitor ids that can collide with another run's lane key.
+  // Both are placeholders, so an unqualified join on either is exactly the
+  // cross-run mis-join this fixes.
   for (const { node } of nodes) {
-    if (claimedNodes.has(node) || node.kind === "step") continue;
+    if (claimedNodes.has(node)) continue;
+    if (node.kind !== "subagent" && node.kind !== "workflow") continue;
     const row = findRow((candidate) => candidate.relation.stepRunId === node.id);
     if (row) claim(node, row);
   }

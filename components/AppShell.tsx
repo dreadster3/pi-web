@@ -175,13 +175,14 @@ export function AppShell() {
   // Refetch the list once per newly appearing non-terminal run id so that row
   // arrives and badges Running, which is what makes the count and the filter
   // agree. Ids are remembered, so this is one bump per id — no timers, no loop.
-  // Step children are skipped: their ids (`step:0`) are session-less placeholders
-  // that the run they belong to already covers.
+  // Only run nodes can spawn a subagent session: `step:<n>` and `host-step`
+  // children are session-less placeholders whose ids the run they belong to
+  // already covers, so they must not consume a forced sessions scan.
   const refreshedSubagentRunIdsRef = useRef<Set<string>>(new Set());
   useEffect(() => {
     let appearing = false;
     for (const run of subagentRuns) {
-      if (run.kind === "step") continue;
+      if (run.kind !== "subagent" && run.kind !== "workflow") continue;
       if (isPiSubagentRunTerminal(run.state) || refreshedSubagentRunIdsRef.current.has(run.id)) continue;
       refreshedSubagentRunIdsRef.current.add(run.id);
       appearing = true;

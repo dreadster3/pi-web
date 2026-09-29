@@ -26,10 +26,10 @@ test("refetches the sessions list once per newly appearing live subagent run id"
   assert.match(effectSource, /refreshedSubagentRunIdsRef\.current\.has\(run\.id\)/);
   assert.match(effectSource, /refreshedSubagentRunIdsRef\.current\.add\(run\.id\)/);
   assert.match(effectSource, /if \(appearing\) setRefreshKey\(\(k\) => k \+ 1\)/);
-  // Terminal runs need no row, and `step:0`-style step ids are session-less
-  // placeholders the run they belong to already covers.
+  // Terminal runs need no row, and only run nodes can spawn one: `step:<n>` and
+  // `host-step` placeholders must not consume a forced sessions scan.
   assert.match(effectSource, /isPiSubagentRunTerminal\(run\.state\)/);
-  assert.match(effectSource, /if \(run\.kind === "step"\) continue/);
+  assert.match(effectSource, /if \(run\.kind !== "subagent" && run\.kind !== "workflow"\) continue/);
   // One bump per render, never a timer or a per-tick loop.
   assert.doesNotMatch(effectSource, /setInterval|setTimeout/);
 });
