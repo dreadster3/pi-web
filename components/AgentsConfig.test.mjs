@@ -320,7 +320,11 @@ test("keeps an open draft out of the quiet refresh's way", () => {
 });
 
 test("a torn-down poll neither reports an error nor clears the loading state", () => {
-  assert.match(source, /if \(options\?\.signal\?\.aborted\) return;/);
+  // A quiet poll's failure is the same story: the next tick retries, so neither
+  // an abort nor a quiet load may raise the banner.
+  assert.match(source, /if \(quiet \|\| options\?\.signal\?\.aborted\) return;/);
   assert.match(source, /if \(!quiet && !options\?\.signal\?\.aborted\) setLoading\(false\)/);
   assert.match(source, /cache: "no-store", signal: options\?\.signal/);
+  // A quiet load that succeeds is the recovery from an earlier quiet failure.
+  assert.match(source, /if \(quiet\) setError\(null\);/);
 });

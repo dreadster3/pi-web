@@ -67,6 +67,36 @@ test("refetches on the hidden -> visible edge but not on the panel's own mount",
   controller.dispose();
 });
 
+test("the activation refetch re-checks the gate instead of bypassing it", (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const gate = { ...visibleGate, draftDirty: false };
+  const refresh = t.mock.fn(async () => {});
+  const controller = createAgentsRefreshController({
+    gate: () => gate,
+    refresh,
+    pollDocument: fakeDocument(),
+  });
+
+  controller.sync(true);
+  controller.sync(false);
+  controller.sync(true);
+  // The draft goes dirty while the debounce is still pending, so the refetch that
+  // lands after it must read the gate rather than the edge that queued it.
+  gate.draftDirty = true;
+  t.mock.timers.tick(AGENTS_REFRESH_ACTIVATION_MS);
+  assert.equal(refresh.mock.callCount(), 0, "a dirty draft outranks the activation refetch");
+
+  // Clean again: the next activation edge refetches, exactly once.
+  gate.draftDirty = false;
+  controller.sync(false);
+  controller.sync(true);
+  t.mock.timers.tick(AGENTS_REFRESH_ACTIVATION_MS - 1);
+  assert.equal(refresh.mock.callCount(), 0);
+  t.mock.timers.tick(1);
+  assert.equal(refresh.mock.callCount(), 1);
+  controller.dispose();
+});
+
 test("polls while visible and skips hidden tabs until the tab returns", (t) => {
   t.mock.timers.enable({ apis: ["setInterval"] });
   const document = fakeDocument("hidden");

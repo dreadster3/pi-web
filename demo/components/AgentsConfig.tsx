@@ -503,6 +503,10 @@ export function AgentsConfig({
       if (!profilesResponse.ok || data.error) throw new Error(data.error ?? `HTTP ${profilesResponse.status}`);
       const next = data.profiles ?? [];
       setProfiles(next);
+      // A background refresh that succeeds is the recovery: whatever failure the
+      // last quiet poll showed is stale by now, so clear it here instead of
+      // waiting for the next load the user triggers.
+      if (quiet) setError(null);
       setCatalog(await readCatalog(catalogResponse));
       setToolOptions(await readTools(toolsResponse));
       const { selectedKey: currentKey, mode: currentMode } = selectionRef.current;
@@ -531,8 +535,10 @@ export function AgentsConfig({
         if (isWritableScope(chosen.scope)) setTargetScope(chosen.scope);
       }
     } catch (cause) {
-      // An aborted quiet poll is a torn-down panel, not a load failure.
-      if (options?.signal?.aborted) return;
+      // A quiet poll never surfaces a failure — the next tick can retry — and an
+      // abort is a torn-down panel, not a load failure either. Only a load the
+      // user is waiting on may set the banner.
+      if (quiet || options?.signal?.aborted) return;
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
       if (!quiet && !options?.signal?.aborted) setLoading(false);
