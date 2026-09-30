@@ -38,7 +38,7 @@ test("a poll needs the visible section, a visible tab, a clean draft, and no wri
 });
 
 test("refetches on the hidden -> visible edge but not on the panel's own mount", (t) => {
-  t.mock.timers.enable({ apis: ["setTimeout"] });
+  t.mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
   const refresh = t.mock.fn(async () => {});
   const controller = createAgentsRefreshController({
     gate: () => visibleGate,
@@ -68,7 +68,7 @@ test("refetches on the hidden -> visible edge but not on the panel's own mount",
 });
 
 test("the activation refetch re-checks the gate instead of bypassing it", (t) => {
-  t.mock.timers.enable({ apis: ["setTimeout"] });
+  t.mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
   const gate = { ...visibleGate, draftDirty: false };
   const refresh = t.mock.fn(async () => {});
   const controller = createAgentsRefreshController({
@@ -98,7 +98,7 @@ test("the activation refetch re-checks the gate instead of bypassing it", (t) =>
 });
 
 test("polls while visible and skips hidden tabs until the tab returns", (t) => {
-  t.mock.timers.enable({ apis: ["setInterval"] });
+  t.mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
   const document = fakeDocument("hidden");
   const refresh = t.mock.fn(async () => {});
   const controller = createAgentsRefreshController({
@@ -122,7 +122,7 @@ test("polls while visible and skips hidden tabs until the tab returns", (t) => {
 });
 
 test("a tab that becomes visible again refreshes without waiting for the next interval", (t) => {
-  t.mock.timers.enable({ apis: ["setInterval"] });
+  t.mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
   const document = fakeDocument("hidden");
   const refresh = t.mock.fn(async () => {});
   const controller = createAgentsRefreshController({
@@ -140,7 +140,7 @@ test("a tab that becomes visible again refreshes without waiting for the next in
 });
 
 test("a draft with unsaved edits suspends polling until it is clean again", (t) => {
-  t.mock.timers.enable({ apis: ["setInterval"] });
+  t.mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
   const gate = { ...visibleGate, draftDirty: true };
   const refresh = t.mock.fn(async () => {});
   const controller = createAgentsRefreshController({
@@ -160,7 +160,7 @@ test("a draft with unsaved edits suspends polling until it is clean again", (t) 
 });
 
 test("a save, override or eject in flight suspends polling without queueing a fetch", (t) => {
-  t.mock.timers.enable({ apis: ["setInterval"] });
+  t.mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
   const gate = { ...visibleGate, busy: true };
   const refresh = t.mock.fn(async () => {});
   const controller = createAgentsRefreshController({
@@ -180,7 +180,7 @@ test("a save, override or eject in flight suspends polling without queueing a fe
 });
 
 test("an in-flight refresh swallows interval ticks until it settles", async (t) => {
-  t.mock.timers.enable({ apis: ["setInterval"] });
+  t.mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
   let release;
   const refresh = t.mock.fn(() => new Promise((resolve) => { release = resolve; }));
   const controller = createAgentsRefreshController({
@@ -202,7 +202,7 @@ test("an in-flight refresh swallows interval ticks until it settles", async (t) 
 });
 
 test("disposing and deactivating stop the interval, the nudge and an in-flight refresh", (t) => {
-  t.mock.timers.enable({ apis: ["setInterval"] });
+  t.mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
   const document = fakeDocument();
   let aborted = false;
   const refresh = t.mock.fn((signal) => {
