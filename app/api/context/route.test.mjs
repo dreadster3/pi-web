@@ -217,6 +217,25 @@ test("refuses a project file whose .pi folder resolves outside the allowed roots
   assert.equal(await readFile(join(linkDir, "SYSTEM.md"), "utf8"), "escaped\n");
 });
 
+test("reports a dangling link at a project entry as not-a-file, not as a link outside the roots", async () => {
+  // The link itself is inside the roots; its target is gone, so there is no file
+  // to read or write — the reason the API's own list names for it.
+  const dangling = join(root, "workspace", "dangling");
+  await mkdir(join(dangling, ".pi"), { recursive: true });
+  await symlink(join(root, "gone", "SYSTEM.md"), join(dangling, ".pi", "SYSTEM.md"));
+  allowFileRoot(dangling);
+
+  const listed = await get(forCwd(dangling));
+  assert.equal(listed.status, 200);
+  assert.equal(fileOf(listed.body, "system-local").problem, "not-a-file");
+
+  const written = await put({ id: "system-local", content: "x", cwd: dangling });
+  assert.equal(written.status, 409);
+  assert.equal((await written.json()).reason, "not-a-file");
+  assert.equal((await lstat(join(dangling, ".pi", "SYSTEM.md"))).isSymbolicLink(), true,
+    "the link is still there, unread and unwritten");
+});
+
 test("refuses a cwd outside the folders Pi Web may read, and a non-file path", async () => {
   const denied = await get(forCwd(other));
   assert.equal(denied.status, 403);

@@ -133,8 +133,12 @@ export function contextPathProblem(
   scope: ContextScope,
   allowedRoots: Set<string>,
 ): ContextPathProblem | undefined {
-  if (scope === "local" && !localPathAllowed(path, allowedRoots)) return "outside-roots";
+  // A directory, or a link to nothing, first: `localPathAllowed()` resolves the
+  // nearest existing ancestor and `realpathSync()` fails on a dangling link, so
+  // asking it first reported the one case the reason list already names as an
+  // `outside-roots` link. Neither can be read or written, so nothing is skipped.
   if (somethingAt(path) && !isRegularFile(path)) return "not-a-file";
+  if (scope === "local" && !localPathAllowed(path, allowedRoots)) return "outside-roots";
   return undefined;
 }
 
