@@ -82,6 +82,7 @@ export const enLocale: LocalePlugin = {
     "context.revert": "Revert",
     "context.deleteConfirm": "Delete {name}? Pi then falls back to the file this one replaced.",
     "context.truncated": "This file is {size} and Pi Web shows only its first part. Edit it outside Pi Web, or keep it small.",
+    "context.truncatedConfirm": "This file is {size}; Pi Web holds only its first part. Saving writes the editor's text over the whole file and drops the rest. Save anyway?",
     "context.selectItem": "Select a context file.",
     "context.loadFailed": "Could not read the context files.",
     "context.loadTimedOut": "Pi Web did not answer in time. Press Refresh to try again.",

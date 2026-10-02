@@ -82,6 +82,7 @@ export const zhCNLocale: LocalePlugin = {
     "context.revert": "还原",
     "context.deleteConfirm": "删除 {name}？Pi 之后会回退到被它替换的文件。",
     "context.truncated": "此文件为 {size}，Pi Web 只显示开头部分。请用其他编辑器修改，或保持文件精简。",
+    "context.truncatedConfirm": "此文件为 {size}，Pi Web 只持有开头部分。保存会用编辑器中的文本覆盖整个文件并丢弃其余内容。仍要保存？",
     "context.selectItem": "请选择一个上下文文件。",
     "context.loadFailed": "无法读取上下文文件。",
     "context.loadTimedOut": "Pi Web 未能及时响应。请按“刷新”重试。",

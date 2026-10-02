@@ -82,6 +82,7 @@ export const zhTWLocale: LocalePlugin = {
     "context.revert": "還原",
     "context.deleteConfirm": "刪除 {name}？Pi 之後會退回被它取代的檔案。",
     "context.truncated": "此檔案為 {size}，Pi Web 只顯示開頭部分。請用其他編輯器修改，或保持檔案精簡。",
+    "context.truncatedConfirm": "此檔案為 {size}，Pi Web 只持有開頭部分。儲存會用編輯器中的文字覆蓋整個檔案並丟棄其餘內容。仍要儲存？",
     "context.selectItem": "請選擇一個內容脈絡檔案。",
     "context.loadFailed": "無法讀取內容脈絡檔案。",
     "context.loadTimedOut": "Pi Web 未能及時回應。請按「重新整理」重試。",

@@ -250,6 +250,16 @@ function ContextFileDetail({
   const dirty = draft !== file.content;
   const blockNoticeId = `context-block-${file.id}`;
 
+  /**
+   * A truncated file is only its first part, so writing the draft back would
+   * drop the rest: Save asks first, as Delete does, and names the size whose
+   * text the write would lose.
+   */
+  const startSave = () => {
+    if (file.truncated && !window.confirm(t("context.truncatedConfirm", { size: formatSize(file.sizeBytes) }))) return;
+    onSave(file, false);
+  };
+
   return (
     <>
       <ConfigDetailHeader>
@@ -320,7 +330,7 @@ function ContextFileDetail({
         <ConfigButton
           variant="primary"
           disabled={block !== null || saving || !dirty}
-          onClick={() => onSave(file, false)}
+          onClick={startSave}
         >
           {saving ? t("i18n.saving") : file.exists ? t("i18n.save") : t("context.create")}
         </ConfigButton>

@@ -240,10 +240,18 @@ test("a file problem is shown on the row and in the card, and blocks the editor"
   assert.equal(contextRowBlockKey({ id: "system-local", path: "/x" }), null);
 });
 
-test("a truncated file says so, and a load failure or timeout has its own words", () => {
+test("a truncated file says so, and a Save of it asks before dropping the rest", () => {
   const big = listing({ files: [{ id: "agents-global", truncated: true, sizeBytes: 400 * 1024 }] });
-  assert.match(text(view({ load: big, selected: "agents-global" })), /Pi Web shows only its first part/);
+  const html = decode(view({ load: big, selected: "agents-global", drafts: { "agents-global": "# edited\n" } }));
+  assert.match(text(html), /Pi Web shows only its first part/);
+  assert.match(html, /<button type="button"[^>]*>Save<\/button>/, "Save is still offered, behind the confirmation");
+  assert.match(source, /if \(file\.truncated && !window\.confirm\(t\("context\.truncatedConfirm", \{ size: formatSize\(file\.sizeBytes\) \}\)\)\) return;/);
+  assert.match(source, /onClick=\{startSave\}/);
+  // Save on a truncated file, and Delete: nothing else asks.
+  assert.equal((source.match(/window\.confirm/g) ?? []).length, 2);
+});
 
+test("a load failure or timeout has its own words", () => {
   const failed = view({ load: { ok: false, error: { error: "Access denied", reason: "cwd-denied" } } });
   assert.match(text(failed), /Could not read the context files\. Pi Web may not read this folder\. Access denied/);
   assert.match(text(failed), /Refresh/, "the panel stays usable after a failed load");
@@ -318,6 +326,7 @@ test("the panel keeps its text out of the source and in the three locales", () =
       "context.loadFailed",
       "context.noProjectNotice",
       "context.truncated",
+      "context.truncatedConfirm",
       "context.precedence.loaded",
       "context.precedence.needsTrust",
       "context.precedence.shadowed",
