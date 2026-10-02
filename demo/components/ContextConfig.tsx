@@ -366,19 +366,24 @@ export function ContextConfig({
   const selectionRef = useRef(selected);
   selectionRef.current = selected;
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (options?: { keepSaveError?: boolean }) => {
     const run = ++loadRunRef.current;
     const result = await loadContextFiles(cwd);
     // A load that started earlier must not put back the older folder's listing.
     if (run !== loadRunRef.current) return;
     setLoad(result);
-    setSaveError(null);
+    // A refresh a refused save started keeps its alert: the reloaded listing has
+    // no trace of a too-large write or a transient failure, so wiping it would
+    // read as a save that landed.
+    if (!options?.keepSaveError) setSaveError(null);
     if (result.ok) setSelected(pickContextFile(result.data.files, selectionRef.current));
   }, [cwd]);
 
   useEffect(() => {
     setSelected(getLastSettingsSelection("context", cwd));
     setDrafts({});
+    // A new project starts with no failed save of the old one's shown.
+    setSaveError(null);
     void refresh();
   }, [cwd, refresh]);
 
@@ -401,8 +406,9 @@ export function ContextConfig({
     setSaving(null);
     if (!result.ok) {
       setSaveError(result.error);
-      // The file may no longer say what the panel showed: load it again, keeping the draft.
-      void refresh();
+      // The file may no longer say what the panel showed: load it again, keeping
+      // the draft and the refusal's own alert.
+      void refresh({ keepSaveError: true });
       return;
     }
     setDrafts((current) => {

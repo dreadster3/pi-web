@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import ts from "typescript";
 import { createJiti } from "jiti";
 
 const jiti = createJiti(import.meta.url, {
@@ -21,6 +22,34 @@ const enSource = await readFile(new URL("../lib/i18n/messages/en.ts", import.met
 const zhSource = await readFile(new URL("../lib/i18n/messages/zh-CN.ts", import.meta.url), "utf8");
 const twSource = await readFile(new URL("../lib/i18n/messages/zh-TW.ts", import.meta.url), "utf8");
 const navigationSource = await readFile(new URL("../lib/settings-navigation.ts", import.meta.url), "utf8");
+
+/** The hook's own `refresh`, taken from the source: state writes cannot be driven from a render. */
+const configSourceFile = ts.createSourceFile("ContextConfig.tsx", source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+
+function callback(name) {
+  let found;
+  const visit = (node) => {
+    if (found) return;
+    if (
+      ts.isVariableDeclaration(node)
+      && node.name.getText(configSourceFile) === name
+      && node.initializer
+      && ts.isCallExpression(node.initializer)
+      && node.initializer.expression.getText(configSourceFile) === "useCallback"
+    ) {
+      found = node.initializer.arguments[0];
+      return;
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(configSourceFile);
+  assert.ok(found, `useCallback ${name} not found`);
+  const js = ts.transpileModule(`(${found.getText(configSourceFile)})`, {
+    compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext },
+  }).outputText.trim().replace(/;$/, "");
+  // The callback's free variables are the hook's state; `with` resolves them from the scope.
+  return new Function("scope", `with (scope) { return ${js}; }`);
+}
 
 const h = React.createElement;
 
@@ -335,9 +364,32 @@ test("the panel's requests carry the project and end at a deadline", async () =>
   assert.match(helperSource, /Promise\.race\(\[run\(\), deadline\]\)/);
 });
 
-test("a save keeps the draft when it fails and reloads the listing", () => {
-  // The panel reloads after a refused save, because the file may no longer say what it showed.
-  assert.match(source, /if \(!result\.ok\) \{\n\s*setSaveError\(result\.error\);\n\s*\/\/[^\n]*\n\s*void refresh\(\);/);
+test("a failed save keeps its alert across the refetch, and a manual refresh clears it", async () => {
+  // The hook's own `refresh`, the only way `saveError` is cleared besides a
+  // successful save and a changed project.
+  const calls = { saveError: [] };
+  const refresh = callback("refresh")({
+    cwd: CWD,
+    loadRunRef: { current: 0 },
+    loadContextFiles: async () => ({ ok: false, error: { error: "too large", reason: "too-large" } }),
+    setLoad: () => {},
+    setSaveError: (value) => calls.saveError.push(value),
+    setSelected: () => {},
+    pickContextFile,
+    selectionRef: { current: "agents-global" },
+  });
+
+  await refresh({ keepSaveError: true });
+  assert.deepEqual(calls.saveError, [], "the refetch a refused save started leaves the alert standing");
+  await refresh();
+  assert.deepEqual(calls.saveError, [null], "a manual refresh clears it");
+
+  // The failure path asks for the load that keeps the alert.
+  assert.match(source, /if \(!result\.ok\) \{[\s\S]*?setSaveError\(result\.error\);[\s\S]*?void refresh\(\{ keepSaveError: true \}\);/);
+  // The alert goes on a manual Refresh, a change of project, and a successful save
+  // (`setSaveError(null)` before the request and the listing the answer carries).
+  assert.match(source, /onRefresh=\{\(\) => void refresh\(\)\}/);
+  assert.match(source, /const save = async \(file: ContextFileInfo, remove: boolean\) => \{\n\s*setSaving\(file\.id\);\n\s*setSaveError\(null\);/);
   assert.match(source, /setDrafts\(\(current\) => \{\n\s*const next = \{ \.\.\.current \};\n\s*delete next\[file\.id\];/);
   // Switching cards never discards typing: one draft per entry.
   assert.match(source, /\[id\]: value/);
