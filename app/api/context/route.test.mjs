@@ -19,6 +19,7 @@ await mkdir(other, { recursive: true });
 
 const jiti = createJiti(import.meta.url, { alias: { "@": process.cwd() } });
 const { allowFileRoot } = await jiti.import("../../../lib/file-access.ts");
+const { trustProject } = await jiti.import("../../../lib/project-trust.ts");
 const { GET, PUT } = await jiti.import("./route.ts");
 allowFileRoot(cwd);
 
@@ -77,21 +78,31 @@ test("lists the seven entries with resolved paths and the discovered agent file"
   assert.equal(fileOf(body, "agents-local").deletable, false);
 });
 
-test("a project .pi file takes over the agent directory's, and nothing is combined", async () => {
-  const { body } = await get(forCwd());
-  const globalSystem = fileOf(body, "system-global");
-
-  assert.equal(globalSystem.exists, false);
-  assert.equal(globalSystem.effective, true, "the agent directory's file is loaded while the project has none");
-  assert.equal(fileOf(body, "system-local").effective, true);
+test("a project .pi file takes over the agent directory's once the project is trusted, and nothing is combined", async () => {
+  // The folder already holds `.pi/SYSTEM.md`, which is itself what makes a
+  // folder require trust, so no decision trusts it yet.
+  const untrusted = await get(forCwd());
+  assert.equal(fileOf(untrusted.body, "system-global").exists, false);
+  assert.equal(fileOf(untrusted.body, "system-global").effective, false, "nothing is there to load");
+  assert.equal(fileOf(untrusted.body, "system-local").effective, false);
+  assert.equal(fileOf(untrusted.body, "system-local").requiresTrust, true);
+  assert.equal(fileOf(untrusted.body, "system-local").content, "project system prompt\n",
+    "the file is still listed and editable while it waits");
 
   await writeFile(join(agentDir, "SYSTEM.md"), "global system prompt\n");
+  const waiting = await get(forCwd());
+  assert.equal(fileOf(waiting.body, "system-global").effective, true,
+    "the agent directory's file is what sessions read until the project is trusted");
+  assert.equal(fileOf(waiting.body, "system-local").effective, false);
+
+  trustProject(cwd, agentDir);
   const replaced = await get(forCwd());
   assert.equal(fileOf(replaced.body, "system-global").effective, false);
   assert.equal(fileOf(replaced.body, "system-global").shadowedBy, localSystem);
   assert.equal(fileOf(replaced.body, "system-global").content, "global system prompt\n",
     "the shadowed file is still listed and editable");
   assert.equal(fileOf(replaced.body, "system-local").effective, true);
+  assert.equal(fileOf(replaced.body, "system-local").requiresTrust, undefined);
 
   await rm(join(agentDir, "SYSTEM.md"));
 });

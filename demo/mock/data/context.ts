@@ -65,7 +65,9 @@ export function contextListing(cwd: string | null): ContextResponse {
       ...spec,
       path,
       exists: text !== undefined,
-      effective: true,
+      // A file that is not there loads nothing; the demo's project is trusted,
+      // so a project system prompt that is there is the one Pi reads.
+      effective: text !== undefined,
       content: text ?? "",
       sizeBytes: text ? text.length : 0,
       truncated: false,

@@ -134,6 +134,7 @@ export function ContextConfigView({
     const block = contextRowBlockKey(file);
     if (block) return t(block);
     if (!file.exists) return t("context.state.missing");
+    if (file.requiresTrust) return t("context.state.needsTrust");
     if (!file.effective) return t("context.state.shadowed");
     return t("context.state.on");
   };
@@ -274,11 +275,17 @@ function ContextFileDetail({
         <ConfigDetailGridRow label={t("context.detail.role")} tone="plain">
           {t(keys.role)}
         </ConfigDetailGridRow>
-        <ConfigDetailGridRow label={t("context.detail.precedence")} tone={file.effective ? "plain" : "dim"}>
-          {file.effective
-            ? t("context.precedence.loaded")
-            : t("context.precedence.shadowed", { path: shortenPath(file.shadowedBy ?? "") })}
-        </ConfigDetailGridRow>
+        {/* Nothing is loaded from a file that is not there, and a project file
+            waits for the project's trust before it takes over. */}
+        {file.exists && (
+          <ConfigDetailGridRow label={t("context.detail.precedence")} tone={file.effective ? "plain" : "dim"}>
+            {file.requiresTrust
+              ? t("context.precedence.needsTrust")
+              : file.effective
+                ? t("context.precedence.loaded")
+                : t("context.precedence.shadowed", { path: shortenPath(file.shadowedBy ?? "") })}
+          </ConfigDetailGridRow>
+        )}
         {file.exists && (
           <ConfigDetailGridRow label={t("context.detail.size")} tone="dim">
             {formatSize(file.sizeBytes)}

@@ -168,6 +168,28 @@ test("shows the resolved path, the discovered file name, and the precedence of e
   assert.match(text(view({ load: discovered, selected: "agents-local" })), /CLAUDE\.md/);
   assert.equal(contextEntryName({ id: "agents-local", path: `${CWD}/CLAUDE.md` }), "CLAUDE.md");
   assert.equal(contextEntryName({ id: "agents-local", path: null }), "AGENTS.md");
+
+  // Nothing is loaded from a file that is not there: no Precedence row, and the
+  // card does not claim Pi reads it.
+  const missing = decode(view({ selected: "system-global" }));
+  assert.doesNotMatch(text(missing), /Pi loads this file\./);
+  assert.doesNotMatch(text(missing), /Precedence/);
+  assert.match(missing, /aria-label="SYSTEM\.md: Not created yet"/);
+
+  // A project system prompt on an untrusted project waits for the trust before it wins.
+  const waiting = listing({
+    files: [
+      { id: "system-global", path: `${AGENT_DIR}/SYSTEM.md`, exists: true, content: "global\n", sizeBytes: 7 },
+      { id: "system-local", path: `${CWD}/.pi/SYSTEM.md`, exists: true, effective: false, requiresTrust: true, content: "project\n", sizeBytes: 8 },
+    ],
+  });
+  const untrustedLocal = decode(view({ load: waiting, selected: "system-local" }));
+  assert.match(text(untrustedLocal), /Pi loads this file once the project is trusted; until then it loads the agent directory's\./);
+  assert.match(untrustedLocal, /aria-label="SYSTEM\.md: Waits for project trust"/);
+  assert.doesNotMatch(text(untrustedLocal), /Pi loads this file\./);
+  // The agent directory's file is the one sessions read until then.
+  const waitingGlobal = text(view({ load: waiting, selected: "system-global" }));
+  assert.match(waitingGlobal, /Precedence/);
 });
 
 test("the discovery and precedence rules from the docs are in the UI", () => {
@@ -181,8 +203,7 @@ test("the discovery and precedence rules from the docs are in the UI", () => {
   assert.match(override, /does not suppress the agent directory's context file/);
 
   const append = text(view({ selected: "append-system-local" }));
-  assert.match(append, /project's \.pi directory\. The project file takes precedence, and the two are never combined\./);
-});
+  assert.match(append, /project's \.pi directory\. The project file takes precedence once the project is trusted, and the two are never combined\./);});
 
 test("saving, reverting and deleting are offered per entry, and Delete only for the override", () => {
   const existing = listing({
@@ -274,6 +295,7 @@ test("the panel keeps its text out of the source and in the three locales", () =
       "context.state.on",
       "context.state.missing",
       "context.state.shadowed",
+      "context.state.needsTrust",
       "context.block.noProject",
       "context.block.outsideRoots",
       "context.preload.notAFile".replace("preload", "block"),
@@ -296,6 +318,9 @@ test("the panel keeps its text out of the source and in the three locales", () =
       "context.loadFailed",
       "context.noProjectNotice",
       "context.truncated",
+      "context.precedence.loaded",
+      "context.precedence.needsTrust",
+      "context.precedence.shadowed",
       "context.saveFailed",
       "context.loadTimedOut",
     ]) {

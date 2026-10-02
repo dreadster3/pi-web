@@ -17,8 +17,9 @@ import { isExistingPathWithinRoots } from "./path-security";
 //
 // Context files are discovered without project trust, so nothing here consults
 // the trust store. `SYSTEM.md` and `APPEND_SYSTEM.md` are the different pair: a
-// project's `.pi/` file takes precedence over the agent directory's, and the two
-// are never combined (`DefaultResourceLoader.discoverSystemPromptFile()`).
+// project's `.pi/` file takes precedence over the agent directory's while the
+// project is trusted, and the two are never combined
+// (`DefaultResourceLoader.discoverSystemPromptFile()`).
 
 /** The context-file names Pi tries in a directory, in order (SDK `loadContextFileFromDir()`). */
 export const CONTEXT_FILE_CANDIDATES = [
@@ -159,6 +160,16 @@ export interface ContextReadOptions {
   agentDir: string;
   cwd: string | null;
   allowedRoots: Set<string>;
+  /**
+   * Whether Pi would load the project's own `.pi/SYSTEM.md` /
+   * `.pi/APPEND_SYSTEM.md` right now. `discoverSystemPromptFile()` prefers those
+   * two only while the project is trusted and falls back to the agent
+   * directory's file otherwise, so an untrusted project's file is reported with
+   * `requiresTrust` and the agent directory's stays the effective one. Called at
+   * most once, and only while one of the two files is there: a file that exists
+   * is itself what makes the folder require trust.
+   */
+  isProjectTrusted: () => boolean;
 }
 
 /**
@@ -167,17 +178,19 @@ export interface ContextReadOptions {
  * without a working directory keeps its place in the list with no path, so the
  * panel can say why it cannot be edited yet.
  */
-export function readContextFiles({ agentDir, cwd, allowedRoots }: ContextReadOptions): ContextResponse {
+export function readContextFiles({ agentDir, cwd, allowedRoots, isProjectTrusted }: ContextReadOptions): ContextResponse {
   const files = CONTEXT_FILE_ORDER.map((id): ContextFileInfo => {
     const spec = CONTEXT_FILE_SPECS[id];
     const path = contextFilePath(id, agentDir, cwd);
+    // A file that is not there loads nothing, so it starts ineffective; the read
+    // below turns that on once a file is found.
     const base: ContextFileInfo = {
       id,
       scope: spec.scope,
       deletable: spec.deletable === true,
       path,
       exists: false,
-      effective: true,
+      effective: false,
       problem: undefined,
       content: "",
       sizeBytes: 0,
@@ -196,9 +209,9 @@ export function readContextFiles({ agentDir, cwd, allowedRoots }: ContextReadOpt
     }
     try {
       const { content, truncated } = readHead(path, CONTEXT_FILE_MAX_BYTES, sizeBytes);
-      return { ...base, exists: true, content, sizeBytes, truncated };
+      return { ...base, exists: true, effective: true, content, sizeBytes, truncated };
     } catch {
-      return { ...base, exists: true, sizeBytes, problem: "unreadable" };
+      return { ...base, exists: true, effective: true, sizeBytes, problem: "unreadable" };
     }
   });
 
@@ -206,6 +219,11 @@ export function readContextFiles({ agentDir, cwd, allowedRoots }: ContextReadOpt
   const localSystem = find("system-local");
   const localAppend = find("append-system-local");
   const localOverride = find("agents-override-local");
+  // Asked only about a file that is there: a project `.pi/SYSTEM.md` is itself
+  // what makes the folder require trust, and a folder without one is never
+  // locked by this.
+  const loadsLocalSystem = localSystem.exists && isProjectTrusted();
+  const loadsLocalAppend = localAppend.exists && isProjectTrusted();
 
   return {
     agentDir,
@@ -215,14 +233,19 @@ export function readContextFiles({ agentDir, cwd, allowedRoots }: ContextReadOpt
       switch (file.id) {
         // The docs' one case of precedence between the two scopes: a project's
         // `.pi/SYSTEM.md` or `.pi/APPEND_SYSTEM.md` takes over the agent
-        // directory's, and the two files are never combined.
+        // directory's while the project is trusted, and the two files are never
+        // combined.
         case "system-global":
-          return shadowedBy(file, localSystem);
+          return shadowedBy(file, loadsLocalSystem ? localSystem : undefined);
         case "append-system-global":
-          return shadowedBy(file, localAppend);
+          return shadowedBy(file, loadsLocalAppend ? localAppend : undefined);
         // AGENTS.override.md replaces AGENTS.md or CLAUDE.md in the same directory only.
         case "agents-local":
           return shadowedBy(file, localOverride);
+        case "system-local":
+          return waitedForTrust(file, loadsLocalSystem);
+        case "append-system-local":
+          return waitedForTrust(file, loadsLocalAppend);
         default:
           return file;
       }
@@ -230,12 +253,18 @@ export function readContextFiles({ agentDir, cwd, allowedRoots }: ContextReadOpt
   };
 }
 
-/** `file`, as the file in the same directory that replaces it, when both are there. */
-function shadowedBy(file: ContextFileInfo, winner: ContextFileInfo): ContextFileInfo {
+/** `file`, as the file that replaces it, when both are there and the winner is loaded. */
+function shadowedBy(file: ContextFileInfo, winner: ContextFileInfo | undefined): ContextFileInfo {
   // A file that is not there is not replaced by anything: the card says it is
   // missing, and Pi's precedence only decides between two files that exist.
-  if (!file.exists || !winner.exists || winner.path === null) return file;
+  if (!file.exists || !winner?.exists || winner.path === null) return file;
   return { ...file, effective: false, shadowedBy: winner.path };
+}
+
+/** A project system prompt that is there but not loaded until the project is trusted. */
+function waitedForTrust(file: ContextFileInfo, loaded: boolean): ContextFileInfo {
+  if (loaded || !file.exists) return file;
+  return { ...file, effective: false, requiresTrust: true };
 }
 
 /**

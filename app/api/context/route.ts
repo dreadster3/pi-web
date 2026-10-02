@@ -15,6 +15,7 @@ import {
 } from "@/lib/context-files";
 import { getAllowedFileRoots } from "@/lib/file-access";
 import { isMcpEntryRefusal, validateMcpProject } from "@/lib/mcp-entry-request";
+import { getProjectTrustStatus } from "@/lib/project-trust";
 import { hasJsonContentType, isApiRequestAllowed } from "@/lib/request-security";
 
 export const dynamic = "force-dynamic";
@@ -24,10 +25,12 @@ export const dynamic = "force-dynamic";
 // Settings sends, never by a path: both routes resolve the file from the agent
 // directory and the project, so no request can reach a file Pi does not read.
 //
-// Context files are discovered without project trust, so nothing here consults
-// the trust store. A project file that resolves outside the folders Pi Web may
-// read is refused, as `.pi/mcp.json` is: the cwd check alone would not cover a
-// `.pi/SYSTEM.md` that is a link out of the project.
+// Context files are discovered without project trust, so nothing here gates a
+// read on it. The one exception is `SYSTEM.md` / `APPEND_SYSTEM.md`, whose
+// project file Pi prefers only while the project is trusted, so the listing says
+// which of the two sessions read. A project file that resolves outside the
+// folders Pi Web may read is refused, as `.pi/mcp.json` is: the cwd check alone
+// would not cover a `.pi/SYSTEM.md` that is a link out of the project.
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -35,6 +38,27 @@ function errorMessage(error: unknown): string {
 
 function refusal(status: number, reason: McpRefusalReason, error: string, path?: string) {
   return NextResponse.json({ error, reason, ...(path ? { path } : {}) } satisfies McpErrorResponse, { status });
+}
+
+/**
+ * Whether Pi would load the project's own `.pi/SYSTEM.md` /
+ * `.pi/APPEND_SYSTEM.md`: `discoverSystemPromptFile()` prefers those only while
+ * the project is trusted, and `getProjectTrustStatus().trusted` is the rule it
+ * applies — a decision trusts the folder. An unreadable `trust.json` counts as
+ * untrusted, as it does for every other trust-gated read. Read at most once per
+ * request.
+ */
+function projectTrustLookup(cwd: string | null, agentDir: string): () => boolean {
+  let trusted: boolean | undefined;
+  return () => {
+    if (trusted !== undefined) return trusted;
+    if (!cwd) return (trusted = false);
+    try {
+      return (trusted = getProjectTrustStatus(cwd, agentDir).trusted);
+    } catch {
+      return (trusted = false);
+    }
+  };
 }
 
 /** The entry's own path, refused with the reason the panel shows. */
@@ -67,8 +91,13 @@ async function readProject(value: unknown): Promise<
 export async function GET(req: Request) {
   const project = await readProject(new URL(req.url).searchParams.get("cwd"));
   if ("response" in project) return project.response;
+  const agentDir = getAgentDir();
   try {
-    return NextResponse.json(readContextFiles({ agentDir: getAgentDir(), ...project }) satisfies ContextResponse);
+    return NextResponse.json(readContextFiles({
+      agentDir,
+      ...project,
+      isProjectTrusted: projectTrustLookup(project.cwd, agentDir),
+    }) satisfies ContextResponse);
   } catch (error) {
     return refusal(500, "internal", errorMessage(error));
   }
@@ -119,7 +148,11 @@ export async function PUT(req: Request) {
       }
       writeContextFile(target.path, content);
     }
-    return NextResponse.json(readContextFiles({ agentDir, ...project }) satisfies ContextResponse);
+    return NextResponse.json(readContextFiles({
+      agentDir,
+      ...project,
+      isProjectTrusted: projectTrustLookup(project.cwd, agentDir),
+    }) satisfies ContextResponse);
   } catch (error) {
     return refusal(500, "internal", errorMessage(error));
   }

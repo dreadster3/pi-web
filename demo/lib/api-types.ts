@@ -629,13 +629,20 @@ export interface ContextFileInfo {
   path: string | null;
   exists: boolean;
   /**
-   * Whether Pi actually loads this file. False when a file in the same place,
-   * listed in `shadowedBy`, takes precedence: a project's `.pi/SYSTEM.md` or
-   * `.pi/APPEND_SYSTEM.md` over the agent directory's, or an
-   * `AGENTS.override.md` over `AGENTS.md` / `CLAUDE.md`.
+   * Whether Pi actually loads this file. False when it is not there, when a file
+   * in the same place, listed in `shadowedBy`, takes precedence (a project's
+   * `.pi/SYSTEM.md` or `.pi/APPEND_SYSTEM.md` over the agent directory's, or an
+   * `AGENTS.override.md` over `AGENTS.md` / `CLAUDE.md`), or while a project
+   * system prompt waits for the project's trust (`requiresTrust`).
    */
   effective: boolean;
   shadowedBy?: string;
+  /**
+   * A project `.pi/SYSTEM.md` or `.pi/APPEND_SYSTEM.md` that is there but not
+   * loaded: `discoverSystemPromptFile()` only prefers the project file while the
+   * project is trusted, so the agent directory's stays the one sessions read.
+   */
+  requiresTrust?: boolean;
   problem?: ContextFileProblem;
   /** The file's text, up to `maxBytes`. Empty when it does not exist or cannot be read. */
   content: string;
