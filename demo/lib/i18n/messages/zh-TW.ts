@@ -57,7 +57,6 @@ export const zhTWLocale: LocalePlugin = {
     "context.state.missing": "尚未建立",
     "context.state.shadowed": "已被專案檔案取代",
     "context.state.needsTrust": "等待專案信任",
-    "context.state.blocked": "無法使用",
     "context.role.agentsGlobal": "在所有工作目錄中生效的使用者指令。",
     "context.role.agentsLocal": "此專案的指令，在此目錄及其下層的所有目錄中生效。",
     "context.role.systemGlobal": "取代 Pi 的預設系統提示詞。",

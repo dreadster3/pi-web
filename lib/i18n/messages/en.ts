@@ -57,7 +57,6 @@ export const enLocale: LocalePlugin = {
     "context.state.missing": "Not created yet",
     "context.state.shadowed": "Replaced by a project file",
     "context.state.needsTrust": "Waits for project trust",
-    "context.state.blocked": "Unavailable",
     "context.role.agentsGlobal": "User instructions applied in every working directory.",
     "context.role.agentsLocal": "Instructions for this project, applied in this directory and everything below it.",
     "context.role.systemGlobal": "Replaces Pi's default system prompt.",
