@@ -306,7 +306,7 @@ test("the panel keeps its text out of the source and in the three locales", () =
       "context.state.needsTrust",
       "context.block.noProject",
       "context.block.outsideRoots",
-      "context.preload.notAFile".replace("preload", "block"),
+      "context.block.notAFile",
       "context.block.unreadable",
       "context.help.agents",
       "context.help.system",
