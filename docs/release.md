@@ -14,7 +14,8 @@ One thing must exist, and it is not a stored npm token: the npm trusted publishe
 ### The npm trusted publisher
 
 **Do this before the first publish, or it fails with `ENONPMTOKEN`.** This repo stores
-no npm token, so npm has to trust the workflow instead.
+no npm token, so npm has to trust the workflow instead. Register the publisher as
+**stage-only**: it may stage a release but must not be able to publish one directly.
 
 1. Open <https://www.npmjs.com/package/@dreadster3/pi-web/access> (npm account with
    publish rights on `@dreadster3/pi-web`).
@@ -23,13 +24,25 @@ no npm token, so npm has to trust the workflow instead.
    - Repository name: `pi-web`
    - Workflow name: `release.yml`
    - Environment: `release`
-3. In the repository's *Settings → Environments*, create an environment named `release`.
+3. **Grant staged publishing only — do not grant direct publish.** Allow
+   `npm stage publish`; disallow `npm publish`. npm then rejects a direct publish
+   from this workflow, so even a compromised CI run cannot make a version live — it
+   can only put a tarball in front of you for approval. (CLI form:
+   `npm trust github … --allow-stage-publish`, without `--allow-publish`.)
+   See <https://docs.npmjs.com/staged-publishing>.
+4. In the repository's *Settings → Environments*, create an environment named `release`.
    It must exist before you register the publisher: the `environment:` field has to name a
    real environment, and it is where publish approval gating will hang.
-4. Save.
+5. On the package's **Settings** page, turn on **"Require two-factor authentication and
+   disallow tokens (recommended)"** so no legacy token can publish either, and make sure
+   2FA is enabled on your npm account — approval of a staged release requires it
+   (<https://docs.npmjs.com/trusted-publishers>, npm's package-settings best practices).
+6. Save.
 
-The runner needs npm ≥ 11.5 and Node ≥ 22.14, which the workflow's Node 24 provides.
-Provenance is generated automatically on this path — no `--provenance` flag, no token.
+The runner needs npm ≥ 11.15.0 for staged publishing (and Node ≥ 22.14, which the
+workflow's Node 24 provides), so `release.yml` pins the CLI with
+`npm install -g npm@11.17.0` before it stages anything. Provenance is generated
+automatically on this path — no `--provenance` token setup, no stored token.
 
 ## The release ritual
 
@@ -62,20 +75,48 @@ See <https://github.com/googleapis/release-please#how-do-i-change-the-version-nu
 
 - **Ship it:** merge. In that same run release-please commits the version, pushes the
   tag `vX.Y.Z` and creates the GitHub release; job `publish` is then unblocked by
-  `needs: release-please` and runs immediately.
+  `needs: release-please` and runs immediately — and **stages** the release rather than
+  publishing it. See step 4.
 - **Hold it back:** leave the PR open. Nothing is released. This is the entire
   hold-back mechanism.
 
 `publish` does, from the released tag:
 
 1. checks out the tag's commit,
-2. `npm ci`,
-3. `npm run build` — required, not `--if-present`: the tarball ships `.next` and
+2. `npm install -g npm@11.17.0` — Node 24's bundled npm is older than the 11.15.0
+   staged publishing needs,
+3. `npm ci`,
+4. `npm run build` — required, not `--if-present`: the tarball ships `.next` and
    `next.config.ts` bakes `NEXT_PUBLIC_APP_VERSION` from `package.json`, so a skipped
    build would publish an empty artifact reporting the wrong version,
-4. `npm test`,
-5. `npm publish --access public`, with provenance attached automatically by the trusted
-   publisher.
+5. `npm test`,
+6. `npm stage publish --provenance --access public` — **staged, not published.** The
+   tarball is uploaded for review; npm requires a 2FA approval before the version
+   becomes installable. `--provenance`/`--access` behave exactly as they do on
+   `npm publish` (`npm stage publish` has full params parity) and provenance is
+   attached automatically by the trusted publisher.
+
+### 4. Approve it on npm
+
+The merge released the *metadata* (tag + GitHub release) and staged the *artifact*,
+but nothing is installable yet. This is the gate.
+
+1. The run's step summary prints the stage line, including the stage id:
+   `+ @dreadster3/pi-web@X.Y.Z (staged with id <stage-id>)`.
+2. Approve it either way — both prompt for 2FA:
+   - npmjs.com → the package → **Staged Packages** tab → **Approve**, or
+   - `npm stage approve <stage-id>` from your laptop.
+3. On approval the version goes live with the dist-tag it was staged with — `latest`,
+   the default for a stable version. There is no separate promotion step.
+
+**The tag is immutable.** npm records the dist-tag on the staged tarball and it
+cannot be changed afterwards, so a stage created with `latest` goes live as `latest`
+or not at all.
+
+**To reject:** `npm stage reject <stage-id>` (2FA) removes the staged package
+permanently. There is no documented expiry — the stage sits there until you act —
+and, because staged versions share the published version index, **a pending stage
+blocks re-staging that same version**. Approve or reject it to clear the way.
 
 ## nix builds: no hash to maintain
 
@@ -90,10 +131,12 @@ fixed-output `npmDepsHash` scheme.) Nothing about a release needs nix work.
 | --- | --- | --- |
 | `package.json` / `package-lock.json` / `CHANGELOG.md` | the merged release PR | what the tree and the next build are |
 | the git tag `vX.Y.Z` | release-please, on that same merge | which commit shipped |
-| the npm registry | the `publish` job | what consumers install |
+| the staged package | the `publish` job | a tarball awaiting your approval |
+| the npm registry | **you**, on 2FA approval | what consumers install |
 
 ```bash
 npm view @dreadster3/pi-web version   # the latest published version
+npm stage list @dreadster3/pi-web     # staged, not yet approved (no 2FA needed)
 git tag --sort=-v:refname | head -1   # the latest release tag
 ```
 
@@ -119,6 +162,17 @@ gh release view v<version> --repo dreadster3/pi-web
 
 - **`ENONPMTOKEN` / "Invalid npm token"** — the trusted publisher is missing or its
   owner/repo/workflow/environment values do not match. Do the setup above.
+- **The run staged instead of published** — expected. That is the gate: approve at
+  npmjs.com (package → *Staged Packages* → *Approve*, 2FA) or
+  `npm stage approve <stage-id>`. Nothing is installable until you do.
+- **"cannot publish version: a staged version already exists" (pending stage)** — a
+  previous run staged this version and it was never approved or rejected. Resolve it:
+  `npm stage approve <stage-id>` to ship it, or `npm stage reject <stage-id>` (2FA) to
+  delete it permanently, then re-run the workflow. Staged versions share the published
+  version index, so the pending stage has to be cleared before re-staging.
+- **`npm stage publish` fails (unknown command / `ENO…`) — the npm CLI is too old.**
+  Staged publishing needs npm ≥ 11.15.0; Node 24's bundled npm is older. `release.yml`
+  pins `npm install -g npm@11.17.0` before staging for exactly this reason.
 - **No release PR appears** — no releasable commit since the last release (all
   `chore:`/`docs:`/`test:`). Merge a `feat:`/`fix:`, or force one with `Release-As:`.
 - **The release PR has no checks** — expected, not a failure. The bot runs on the
