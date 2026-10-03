@@ -1,187 +1,129 @@
-# Release Checklist
+# Releases
 
-This repo publishes two artifacts for each release:
+release-please owns the version bookkeeping; you own the *when*. It keeps one
+accumulating release pull request open, and merging that PR is the release.
 
-- npm package: `@dreadster3/pi-web`
-- GitHub Release: `dreadster3/pi-web`
+Nothing releases until you merge the bot's PR, and no workflow ever pushes to `main`
+— it is protected by this repository's ruleset (*Default*: pull requests required, no
+bypass actors), so every change to it, including the version bump, arrives as a PR.
 
-Use this checklist from a clean `main` checkout.
+## One-time setup (do this before the first release)
 
-## 1. Preflight
+One thing must exist, and it is not a stored npm token: the npm trusted publisher.
+
+### The npm trusted publisher
+
+**Do this before the first publish, or it fails with `ENONPMTOKEN`.** This repo stores
+no npm token, so npm has to trust the workflow instead.
+
+1. Open <https://www.npmjs.com/package/@dreadster3/pi-web/access> (npm account with
+   publish rights on `@dreadster3/pi-web`).
+2. Add a **Trusted Publisher** for GitHub Actions with exactly these values:
+   - Repository owner: `dreadster3`
+   - Repository name: `pi-web`
+   - Workflow name: `release.yml`
+   - Environment: `main`
+3. Save.
+
+The runner needs npm ≥ 11.5 and Node ≥ 22.14, which the workflow's Node 24 provides.
+Provenance is generated automatically on this path — no `--provenance` flag, no token.
+
+## The release ritual
+
+### 1. Let the bot propose a version
+
+On every push to `main`, the `release-please` job reads the conventional commits since
+the last release and opens (or updates) **one** pull request that:
+
+- bumps `version` in `package.json` and `package-lock.json`,
+- writes the new section at the top of `CHANGELOG.md`.
+
+`feat:` → minor, `fix:` → patch, `feat!:`/`BREAKING CHANGE:` → major.
+
+While a release PR is open, further merges to `main` add to it rather than opening a
+second one — review it whenever you like.
+
+### 2. Adjust the version if you want to
+
+Two documented overrides:
+
+- **`Release-As: x.y.z` in a commit body** on `main` forces the next release PR to that
+  version:
+  `git commit --allow-empty -m "chore: release 2.0.0" -m "Release-As: 2.0.0"`
+- **Edit the release PR's title.** release-please reads the version back out of the
+  title on its next run.
+
+See <https://github.com/googleapis/release-please#how-do-i-change-the-version-number>.
+
+### 3. Merge the release PR (or don't)
+
+- **Ship it:** merge. In that same run release-please commits the version, pushes the
+  tag `vX.Y.Z` and creates the GitHub release; job `publish` is then unblocked by
+  `needs: release-please` and runs immediately.
+- **Hold it back:** leave the PR open. Nothing is released. This is the entire
+  hold-back mechanism.
+
+`publish` does, from the released tag:
+
+1. checks out the tag's commit,
+2. `npm ci`,
+3. `npm run build` — required, not `--if-present`: the tarball ships `.next` and
+   `next.config.ts` bakes `NEXT_PUBLIC_APP_VERSION` from `package.json`, so a skipped
+   build would publish an empty artifact reporting the wrong version,
+4. `npm test`,
+5. `npm publish --access public`, with provenance attached automatically by the trusted
+   publisher.
+
+## nix builds: no hash to maintain
+
+`package.nix` takes its npm dependencies straight from `package-lock.json` through
+`importNpmLock`, so there is no `npmDepsHash` to refresh and no caretaker workflow —
+a version bump or a dependency change is just a lock edit. (`#24` retired the old
+fixed-output `npmDepsHash` scheme.) Nothing about a release needs nix work.
+
+## Where the version lives
+
+| Place | Written by | Truth for |
+| --- | --- | --- |
+| `package.json` / `package-lock.json` / `CHANGELOG.md` | the merged release PR | what the tree and the next build are |
+| the git tag `vX.Y.Z` | release-please, on that same merge | which commit shipped |
+| the npm registry | the `publish` job | what consumers install |
 
 ```bash
-git status --short --branch
-git log --oneline --decorate -5
-gh auth status
-npm whoami
-node -e "const p=require('./package.json'); console.log(p.version)"
+npm view @dreadster3/pi-web version   # the latest published version
+git tag --sort=-v:refname | head -1   # the latest release tag
 ```
 
-Expected:
+## Retired
 
-- `git status` is clean, or only contains changes you intentionally plan to release.
-- GitHub is authenticated as an account that can push and create releases.
-- npm is authenticated as an account that can publish `@dreadster3/pi-web`.
+- **`npm run release` from a laptop.** The script is gone; publishing is CI-only.
+- **Hand-made version PRs.** release-please opens them.
+- **Hand-written bilingual release notes.** `CHANGELOG.md` is bot-written, in English,
+  and the GitHub release is created from it.
 
-## 2. Publish to npm
-
-For the **first publish** of the package (`0.0.1`), publish directly — `npm version patch` would skip to `0.0.2`:
-
-```bash
-npm run build && npm pack --dry-run && npm publish --access public
-```
-
-For every subsequent release:
+## Verifying a release
 
 ```bash
-npm run release
-```
+npm view @dreadster3/pi-web version
+npm view @dreadster3/pi-web@<version> dist.attestations   # provenance
 
-The release script runs:
-
-```bash
-npm version patch --no-git-tag-version && npm run build && npm publish --access public
-```
-
-Notes:
-
-- This bumps `package.json` and `package-lock.json`.
-- It intentionally runs a production build. Do not run `next build` during normal development; release work is the exception.
-- Before publishing, `npm pack --dry-run` prints the tarball contents; verify that `bin/`, `.next/`, `public/` are present and that `demo/`, `docs/`, `e2e/`, and `public/sw.test.mjs` are absent.
-- Provenance is not enabled in `publishConfig`; publish locally without it. If publishing is later moved to GitHub Actions, configure a Trusted Publisher and `permissions: id-token: write` there instead — provenance is generated automatically in that setup.
-- If `npm view @dreadster3/pi-web version` briefly shows the previous version, check the exact version instead:
-
-```bash
-npm view @dreadster3/pi-web@<version> version --registry https://registry.npmjs.org/
-npm view @dreadster3/pi-web versions --json --registry https://registry.npmjs.org/
-```
-
-## 3. Commit the Version Bump
-
-Replace `<version>` with the new package version, for example `0.7.5`.
-
-```bash
-git diff -- package.json package-lock.json
-git add package.json package-lock.json
-git commit -m "Release v<version>"
-```
-
-## 4. Tag and Push
-
-```bash
-git tag -a v<version> -m "v<version>"
-git push origin main --tags
-```
-
-Confirm the tag does not already exist before creating it when unsure:
-
-```bash
-git ls-remote --tags origin v<version>
+git fetch --tags origin
+git tag --sort=-v:refname | head -3
 gh release view v<version> --repo dreadster3/pi-web
 ```
 
-## 5. Generate Release Notes from Commits
+## If a run fails
 
-Use the previous release tag as the base.
-
-```bash
-git log --oneline --decorate v<previous>..v<version>
-git log --format='%h%x09%s%n%b' v<previous>..v<version>
-git diff --stat v<previous>..v<version>
-```
-
-Write the release notes from those commits, not from memory. Include both Chinese and English sections. Keep commit hashes next to each item when useful.
-
-Suggested structure:
-
-```markdown
-## 中文
-
-基于 `v<previous>..v<version>` 的提交整理。
-
-### 新增
-
-- ...
-
-### 修复
-
-- ...
-
-### 改进
-
-- ...
-
-### 内部调整
-
-- 发布 npm 包 `@dreadster3/pi-web@<version>`。
-
-## English
-
-Prepared from commits in `v<previous>..v<version>`.
-
-### Added
-
-- ...
-
-### Fixed
-
-- ...
-
-### Improved
-
-- ...
-
-### Internal
-
-- Published npm package `@dreadster3/pi-web@<version>`.
-```
-
-## 6. Create or Update the GitHub Release
-
-Create a new release:
-
-```bash
-gh release create v<version> \
-  --repo dreadster3/pi-web \
-  --verify-tag \
-  --title "v<version>" \
-  --notes-file release-notes.md
-```
-
-If the release already exists and only the notes need updating:
-
-```bash
-gh release edit v<version> \
-  --repo dreadster3/pi-web \
-  --notes-file release-notes.md
-```
-
-You can avoid a temporary file by passing notes through stdin:
-
-```bash
-gh release edit v<version> --repo dreadster3/pi-web --notes-file - <<'EOF'
-## 中文
-
-...
-
-## English
-
-...
-EOF
-```
-
-## 7. Final Verification
-
-```bash
-gh release view v<version> --repo dreadster3/pi-web
-npm view @dreadster3/pi-web@<version> version --registry https://registry.npmjs.org/
-git status --short --branch
-git log --oneline --decorate -3
-```
-
-Expected:
-
-- GitHub Release exists and is not a draft unless intentionally published as one.
-- npm exact version resolves.
-- `main` is aligned with `origin/main`.
-- `HEAD` points at the release commit and `v<version>` tag.
+- **`ENONPMTOKEN` / "Invalid npm token"** — the trusted publisher is missing or its
+  owner/repo/workflow/environment values do not match. Do the setup above.
+- **No release PR appears** — no releasable commit since the last release (all
+  `chore:`/`docs:`/`test:`). Merge a `feat:`/`fix:`, or force one with `Release-As:`.
+- **The release PR has no checks** — expected, not a failure. The bot runs on the
+  default `GITHUB_TOKEN`, and a PR opened with it does not trigger other workflows. This
+  is accepted because publish is chained by `needs:` in the same run, the ruleset
+  requires no status checks, and release PRs only touch version fields and the
+  changelog. If required status checks
+  are ever added to the ruleset, give the `release-please` job an App token
+  (`actions/create-github-app-token`) so the release PR triggers them.
+- **Merged the PR but no tag/release** — re-run the workflow
+  (*Actions → Release → Run workflow*); re-runs re-detect the merged PR.
