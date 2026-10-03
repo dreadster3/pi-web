@@ -9,6 +9,7 @@ export const CONTEXT_SAVE_TIMEOUT_MS = 15_000;
 
 export type ContextFailure = {
   error: string;
+  /** A refusal code; the root module types this as `McpRefusalReason`, which the demo does not carry. */
   reason?: string;
   path?: string;
   /** The request was aborted at its deadline instead of answered. */
