@@ -40,9 +40,10 @@ no npm token, so npm has to trust the workflow instead. Register the publisher a
 6. Save.
 
 The runner needs npm ≥ 11.15.0 for staged publishing (and Node ≥ 22.14, which the
-workflow's Node 24 provides), so `release.yml` pins the CLI with
-`npm install -g npm@11.17.0` before it stages anything. Provenance is generated
-automatically on this path — no `--provenance` token setup, no stored token.
+workflow's Node 24 provides). Current Node 24 (24.18+) bundles npm ≥ 11.16, so the
+requirement is already met; `release.yml` still pins the CLI with
+`npm install -g npm@11.17.0` for determinism across runner images. Provenance is
+generated automatically on this path — no `--provenance` token setup, no stored token.
 
 ## The release ritual
 
@@ -83,8 +84,8 @@ See <https://github.com/googleapis/release-please#how-do-i-change-the-version-nu
 `publish` does, from the released tag:
 
 1. checks out the tag's commit,
-2. `npm install -g npm@11.17.0` — Node 24's bundled npm is older than the 11.15.0
-   staged publishing needs,
+2. `npm install -g npm@11.17.0` — pinned for determinism; current Node 24 (24.18+)
+   already bundles npm ≥ 11.16, above the 11.15.0 staged publishing needs,
 3. `npm ci`,
 4. `npm run build` — required, not `--if-present`: the tarball ships `.next` and
    `next.config.ts` bakes `NEXT_PUBLIC_APP_VERSION` from `package.json`, so a skipped
@@ -168,11 +169,14 @@ gh release view v<version> --repo dreadster3/pi-web
 - **"cannot publish version: a staged version already exists" (pending stage)** — a
   previous run staged this version and it was never approved or rejected. Resolve it:
   `npm stage approve <stage-id>` to ship it, or `npm stage reject <stage-id>` (2FA) to
-  delete it permanently, then re-run the workflow. Staged versions share the published
+  delete it permanently, then re-run the workflow. A re-run only helps after a reject:
+  once approved the version is live, so re-running re-stages the same version and fails
+  with version-already-exists — expected. Staged versions share the published
   version index, so the pending stage has to be cleared before re-staging.
 - **`npm stage publish` fails (unknown command / `ENO…`) — the npm CLI is too old.**
-  Staged publishing needs npm ≥ 11.15.0; Node 24's bundled npm is older. `release.yml`
-  pins `npm install -g npm@11.17.0` before staging for exactly this reason.
+  Staged publishing needs npm ≥ 11.15.0; current Node 24 (24.18+) bundles npm ≥ 11.16,
+  so this should not happen on an up-to-date runner, but `release.yml` pins
+  `npm install -g npm@11.17.0` for determinism across runner images.
 - **No release PR appears** — no releasable commit since the last release (all
   `chore:`/`docs:`/`test:`). Merge a `feat:`/`fix:`, or force one with `Release-As:`.
 - **The release PR has no checks** — expected, not a failure. The bot runs on the
