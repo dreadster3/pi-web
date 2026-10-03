@@ -22,8 +22,11 @@ no npm token, so npm has to trust the workflow instead.
    - Repository owner: `dreadster3`
    - Repository name: `pi-web`
    - Workflow name: `release.yml`
-   - Environment: `main`
-3. Save.
+   - Environment: `release`
+3. In the repository's *Settings → Environments*, create an environment named `release`.
+   It must exist before you register the publisher: the `environment:` field has to name a
+   real environment, and it is where publish approval gating will hang.
+4. Save.
 
 The runner needs npm ≥ 11.5 and Node ≥ 22.14, which the workflow's Node 24 provides.
 Provenance is generated automatically on this path — no `--provenance` flag, no token.
