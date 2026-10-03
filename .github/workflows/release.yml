@@ -31,10 +31,11 @@ name: Release
 # or `npm trust github … --allow-stage-publish` without `--allow-publish`). npm then
 # rejects `npm publish` from this workflow, so a compromised run could stage a
 # tarball but could never move a version live — the OWNER's 2FA click is the only
-# way. Staged publishing needs npm >= 11.15.0; current Node 24 (24.18+) bundles npm
-# >= 11.16, so the `npm install -g npm@11.17.0` pin below is belt-and-braces
-# determinism (toolcache images can carry older npm), not a required bump
-# (https://docs.npmjs.com/staged-publishing). The dist-tag is IMMUTABLE: whatever
+# way. Staged publishing needs npm >= 11.15.0; the node-24 toolcache image
+# setup-node installs bundles npm >= 11.16, so the floor is met with no pin
+# (https://docs.npmjs.com/staged-publishing). If a future image ever shipped an
+# older npm, `npm stage publish` fails as an unknown command — the playbook in
+# docs/release.md names that failure. The dist-tag is IMMUTABLE: whatever
 # tag the stage carries (`latest` here, the default for a stable version) is the tag
 # the version goes live with on approval; there is no separate promotion step.
 #
@@ -117,12 +118,10 @@ jobs:
           node-version: 24
           package-manager-cache: false
 
-      # Staged publishing requires npm >= 11.15.0, which current Node 24 (24.18+,
-      # npm >= 11.16) already satisfies; pin the CLI anyway for determinism across
-      # toolcache images (same pin hono's release.yml uses):
-      # https://docs.npmjs.com/staged-publishing
-      - run: npm install -g npm@11.17.0
-
+      # npm floor: staged publishing requires npm >= 11.15.0, and the node-24
+      # toolcache this setup-node installs bundles npm >= 11.16 — no pin needed
+      # (https://docs.npmjs.com/staged-publishing; the header says what to do if a
+      # future image ever ships an older npm).
       - run: npm ci
 
       # Required, not --if-present: the tarball ships .next and next.config.ts bakes

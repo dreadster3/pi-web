@@ -40,10 +40,10 @@ no npm token, so npm has to trust the workflow instead. Register the publisher a
 6. Save.
 
 The runner needs npm ≥ 11.15.0 for staged publishing (and Node ≥ 22.14, which the
-workflow's Node 24 provides). Current Node 24 (24.18+) bundles npm ≥ 11.16, so the
-requirement is already met; `release.yml` still pins the CLI with
-`npm install -g npm@11.17.0` for determinism across runner images. Provenance is
-generated automatically on this path — no `--provenance` token setup, no stored token.
+workflow's Node 24 provides). The node-24 toolcache image `setup-node` installs
+bundles npm ≥ 11.16, so the requirement is already met and `release.yml` runs no npm
+pin. Provenance is generated automatically on this path — no `--provenance` token
+setup, no stored token.
 
 ## The release ritual
 
@@ -84,14 +84,13 @@ See <https://github.com/googleapis/release-please#how-do-i-change-the-version-nu
 `publish` does, from the released tag:
 
 1. checks out the tag's commit,
-2. `npm install -g npm@11.17.0` — pinned for determinism; current Node 24 (24.18+)
-   already bundles npm ≥ 11.16, above the 11.15.0 staged publishing needs,
-3. `npm ci`,
-4. `npm run build` — required, not `--if-present`: the tarball ships `.next` and
+2. `npm ci` — the npm floor (≥ 11.15.0) comes from the node-24 toolcache's bundled
+   npm ≥ 11.16, no pin step,
+3. `npm run build` — required, not `--if-present`: the tarball ships `.next` and
    `next.config.ts` bakes `NEXT_PUBLIC_APP_VERSION` from `package.json`, so a skipped
    build would publish an empty artifact reporting the wrong version,
-5. `npm test`,
-6. `npm stage publish --provenance --access public` — **staged, not published.** The
+4. `npm test`,
+5. `npm stage publish --provenance --access public` — **staged, not published.** The
    tarball is uploaded for review; npm requires a 2FA approval before the version
    becomes installable. `--provenance`/`--access` behave exactly as they do on
    `npm publish` (`npm stage publish` has full params parity) and provenance is
@@ -174,9 +173,11 @@ gh release view v<version> --repo dreadster3/pi-web
   with version-already-exists — expected. Staged versions share the published
   version index, so the pending stage has to be cleared before re-staging.
 - **`npm stage publish` fails (unknown command / `ENO…`) — the npm CLI is too old.**
-  Staged publishing needs npm ≥ 11.15.0; current Node 24 (24.18+) bundles npm ≥ 11.16,
-  so this should not happen on an up-to-date runner, but `release.yml` pins
-  `npm install -g npm@11.17.0` for determinism across runner images.
+  Staged publishing needs npm ≥ 11.15.0. The node-24 toolcache image `setup-node`
+  installs bundles npm ≥ 11.16, so this should not happen on an up-to-date runner; if
+  it ever does — a future image shipping an older npm — the workflow's header comment
+  names this failure and the fix is a `npm install -g npm@<latest 11.x>` step in
+  `release.yml`.
 - **No release PR appears** — no releasable commit since the last release (all
   `chore:`/`docs:`/`test:`). Merge a `feat:`/`fix:`, or force one with `Release-As:`.
 - **The release PR has no checks** — expected, not a failure. The bot runs on the
