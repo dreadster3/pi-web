@@ -81,7 +81,9 @@ jobs:
       # why that is fine and what to change if that stops being true.
       #
       # Manifest mode: no `release-type` here, the config file carries it.
-      - uses: googleapis/release-please-action@v4
+      # v5 is additive-only over v4 (same inputs, same `${{ github.token }}` default);
+      # it bundles release-please 17.6 (was 17.3), so the first bot PR is the smoke test.
+      - uses: googleapis/release-please-action@v5
         id: release
         with:
           config-file: release-please-config.json
@@ -106,14 +108,14 @@ jobs:
       id-token: write # OIDC for npm trusted publishing; provenance follows from it
     steps:
       # The tag release-please just pushed, so the build is of the released commit.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.release-please.outputs.tag_name }}
 
       # Node 24 for trusted publishing; staged publishing also needs Node >= 22.14.
       # package-manager-cache: false — no cache for a job holding an OIDC publish
       # token (supply-chain hardening; the input exists from setup-node v5 on).
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           package-manager-cache: false
