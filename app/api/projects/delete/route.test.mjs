@@ -4,8 +4,8 @@
 // still there rather than about the route's intentions.
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { existsSync, lstatSync, readFileSync, readlinkSync } from "node:fs";
-import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { existsSync, lstatSync, readFileSync, readdirSync, readlinkSync } from "node:fs";
+import { chmod, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { after } from "node:test";
@@ -56,10 +56,19 @@ const userEntry = (id, content) => ({
  * cwds (`-worktrees` included, as a git project's worktree sessions are), a
  * pi-subagents child tree and an artifact transcript under the first.
  */
-async function fixture({ symlinked = false } = {}) {
+async function fixture({ symlinkAgentDir = false } = {}) {
   const root = await mkdtemp(join(tmpdir(), "pi-web-project-delete-"));
   roots.push(root);
-  const agentDir = join(root, "agent");
+  // The agent dir as the scanner will spell it, and where it really lives. A
+  // symlinked agent dir (macOS /var → /private/var, or a synced ~/.pi) is the
+  // case the catalogue's session paths and their realpaths disagree on.
+  const realAgentDir = join(root, "agent-real");
+  const agentDir = symlinkAgentDir ? join(root, "agent") : realAgentDir;
+  if (symlinkAgentDir) {
+    // The target must exist before the link can be walked through.
+    await mkdir(realAgentDir, { recursive: true });
+    await symlink(realAgentDir, agentDir, "dir");
+  }
   const sessionsDir = join(agentDir, "sessions");
   // A real repository with a linked worktree, so the worktree's sessions group
   // under the main checkout exactly as they do in the app.
@@ -79,6 +88,8 @@ async function fixture({ symlinked = false } = {}) {
   const dirFor = (cwd) => join(sessionsDir, `--${cwd.slice(1).replace(/[/\\:]/g, "-")}--`);
 
   async function session(cwd, id, extraHeader = {}, firstMessage = id) {
+    // Through the link when the agent dir is one: the session must be at the
+    // path the scanner enumerates, whose realpath differs.
     const dir = dirFor(cwd);
     await mkdir(dir, { recursive: true });
     const file = join(dir, `${id}.jsonl`);
@@ -93,7 +104,7 @@ async function fixture({ symlinked = false } = {}) {
   globalThis.__piPathToSessionIdCache = undefined;
   globalThis.__piSmCache = undefined;
 
-  return { root, agentDir, sessionsDir, repo, worktree, other, dirFor, session, symlinked };
+  return { root, agentDir, realAgentDir, sessionsDir, repo, worktree, other, external: root, dirFor, session };
 }
 
 /** The key the server groups the cwd's sessions under, derived the same way the sidebar does. */
@@ -304,4 +315,101 @@ test("the route derives every removed path from an enumerated session, never fro
     .map((needle) => source.indexOf(needle));
   assert.ok(order.every((index) => index >= 0), "every guard is present");
   assert.deepEqual(order, [...order].sort((a, b) => a - b), "403 before 415 before 400");
+});
+
+test("deletes through a symlinked agent directory, where the catalogue's paths are not real paths", { skip: process.platform === "win32" }, async (t) => {
+  // macOS '/var' → '/private/var' and a symlinked '~/.pi' both put the agent
+  // directory behind a link. The scanner builds session paths by joining the
+  // path as given, so grouping against its realpath used to reject every
+  // session and answer a false 404 on a project the sidebar was showing.
+  const { realAgentDir, repo, dirFor, session } = await fixture({ symlinkAgentDir: true });
+  const file = await session(repo, "linked-agent-session");
+
+  const projectKey = await projectKeyOf(repo);
+  const { status, body } = await answer(await post({ projectKey }));
+
+  assert.equal(status, 200);
+  assert.equal(body.deletedSessions, 1);
+  assert.equal(body.removedDirs, 1);
+  assert.equal(existsSync(file), false);
+  assert.equal(existsSync(join(realAgentDir, "sessions")), true, "the real sessions tree itself is left");
+  assert.deepEqual(readdirSync(join(realAgentDir, "sessions")), [], "its project directory is gone");
+});
+
+test("unlinks a session file that is a symbolic link, leaving its target intact", { skip: process.platform === "win32" }, async (t) => {
+  const { repo, external, dirFor, session } = await fixture(t);
+  const externalTarget = join(external, "target-session.jsonl");
+  await writeFile(externalTarget, line({ type: "session", version: 3, id: "linked-session", cwd: repo, timestamp }));
+  const linkPath = join(dirFor(repo), "linked-session.jsonl");
+  await mkdir(dirFor(repo), { recursive: true });
+  await symlink(externalTarget, linkPath, "file");
+  resetSessionScanIndexForTests();
+  invalidateSessionListCache();
+
+  const projectKey = await projectKeyOf(repo);
+  const { status } = await answer(await post({ projectKey }));
+
+  assert.equal(status, 200);
+  assert.equal(existsSync(linkPath), false, "the link is removed");
+  assert.equal(existsSync(externalTarget), true, "the file it pointed at survives: unlink never follows a link");
+});
+
+test("reports a session file it cannot remove and still deletes the project's other directories", async (t) => {
+  if (process.platform === "win32" || process.getuid?.() === 0) {
+    t.skip("a read-only directory does not stop root or Windows");
+    return;
+  }
+  const { repo, worktree, dirFor, session } = await fixture(t);
+  const lockedDir = dirFor(repo);
+  const locked = await session(repo, "locked-session");
+  const worktreeFile = await session(worktree, "worktree-session");
+  // A directory with no write permission: unlink raises EACCES, not ENOENT.
+  await chmod(lockedDir, 0o500);
+  t.after(() => chmod(lockedDir, 0o700).catch(() => undefined));
+
+  const projectKey = await projectKeyOf(repo);
+  const { status, body } = await answer(await post({ projectKey }));
+
+  assert.equal(status, 200);
+  assert.equal(existsSync(locked), true, "what could not be removed is still there");
+  assert.equal(existsSync(worktreeFile), false, "the project's other directory was still cleaned out");
+  assert.equal(body.deletedSessions, 1, "only the session that went counts");
+  assert.equal(body.removedDirs, 1);
+  assert.ok(
+    body.failures.some((failure) => failure.path === locked),
+    "the failure names the file left behind",
+  );
+});
+
+test("refuses a project whose session has an idle but live wrapper, and deletes nothing", async (t) => {
+  const { repo, session } = await fixture(t);
+  const idleFile = await session(repo, "idle-live", {}, "Open chat");
+  const projectKey = await projectKeyOf(repo);
+
+  // An idle-alive wrapper: its run finished, its chat tab is still open, and it
+  // still owns the file. Deleting under it is what the refusal prevents.
+  const previous = globalThis.__piSessions;
+  globalThis.__piSessions = new Map([["idle-live", {
+    get sessionId() { return "idle-live"; },
+    get sessionFile() { return idleFile; },
+    get cwd() { return repo; },
+    isAlive: () => true,
+    isRunning: () => false,
+    inner: {
+      sessionManager: {
+        getHeader: () => ({ type: "session", id: "idle-live", cwd: repo, timestamp }),
+        getEntries: () => [userEntry("idle-live-u1", "Open chat")],
+        getSessionFile: () => idleFile,
+        getSessionName: () => "Open chat",
+      },
+    },
+  }]]);
+  t.after(() => { globalThis.__piSessions = previous; });
+
+  const { status, body } = await answer(await post({ projectKey }));
+
+  assert.equal(status, 409);
+  assert.equal(body.reason, "session-busy");
+  assert.deepEqual(body.runningSessionTitles, ["Open chat"]);
+  assert.equal(existsSync(idleFile), true, "the live wrapper's file is refused, not deleted under it");
 });
