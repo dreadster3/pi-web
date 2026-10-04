@@ -135,7 +135,9 @@ test("deletes every session of one project, its child trees and its directories,
   const { status, body } = await answer(await post({ projectKey }));
 
   assert.equal(status, 200);
-  assert.deepEqual(body, { deletedSessions: 2, removedDirs: 2 });
+  // Two top-level session files, plus the nested pi-subagents child that goes
+  // with its parent's child tree.
+  assert.deepEqual(body, { deletedSessions: 3, removedDirs: 2 });
   assert.equal(existsSync(mainSession), false, "the main cwd's session is gone");
   assert.equal(existsSync(worktreeSession), false, "the worktree's session is gone too");
   assert.equal(existsSync(childTree), false, "the pi-subagents child tree is gone");
@@ -291,8 +293,10 @@ test("the route derives every removed path from an enumerated session, never fro
   const source = readFileSync(new URL("./route.ts", import.meta.url), "utf8");
   assert.match(source, /workspaceKeyOf\(session\) === projectKey/);
   assert.match(source, /projectDirOf\(session\.path, root\)/);
-  assert.match(source, /const dir = dirname\(candidate\)/);
-  assert.match(source, /relative\(root, dir\)/);
+  // The project directory is the first path segment of a real session path,
+  // under the root the route resolved itself.
+  assert.match(source, /const \[projectDirName\] = relativePath\.split\(sep\)/);
+  assert.match(source, /return join\(root, projectDirName\)/);
   assert.doesNotMatch(source, /join\((?:sessionsDir|root), projectKey\)/, "the key is never joined into a path");
   assert.doesNotMatch(source, /resolvePath\(projectKey\)/);
   // Guards, in the order the other mutating routes use.

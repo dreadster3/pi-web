@@ -17,7 +17,6 @@ import {
   invalidateSessionPathCache,
   listAllSessions,
   mergeSessionLists,
-  isPiSubagentChildSessionPath,
   piSubagentChildRootDir,
 } from "@/lib/session-reader";
 import { getRpcSessionInfos, getRunningRpcSessionIds, hasBusyRpcSessionForCwd } from "@/lib/rpc-manager";
@@ -70,22 +69,27 @@ function sessionsRoot(): string | null {
 }
 
 /**
- * The per-cwd project directory of one session, or null when that directory
- * is not exactly one level below the sessions root. Every path the route
- * removes comes from here, so a malformed catalogue entry (a stray file, a
- * nested child transcript) can never widen the removal.
+ * The per-cwd project directory one session belongs to, or null when the path
+ * is not inside the sessions root at all. Every path the route removes is
+ * derived from here, so a malformed catalogue entry can never widen the
+ * removal: the directory is `<root>/<first path segment>` of a real session
+ * path, never a path built from the posted key.
  */
 function projectDirOf(sessionPath: string, root: string): string | null {
   const candidate = resolvePath(sessionPath);
   if (hasParentDirectorySegment(candidate)) return null;
-  const dir = dirname(candidate);
-  const relativePath = relative(root, dir);
+  const relativePath = relative(root, candidate);
   if (!relativePath || relativePath === ".." || relativePath.startsWith(`..${sep}`) || isAbsolute(relativePath)) {
     return null;
   }
-  // Exactly `<root>/<encoded-cwd>`: no deeper, and never the root itself.
-  if (relativePath.includes(sep)) return null;
-  return dir;
+  const [projectDirName] = relativePath.split(sep);
+  if (!projectDirName) return null;
+  return join(root, projectDirName);
+}
+
+/** True for a session file directly inside a project directory, rather than nested in a child tree. */
+function isTopLevelSessionPath(sessionPath: string, projectDir: string): boolean {
+  return dirname(resolvePath(sessionPath)) === resolvePath(projectDir);
 }
 
 /** Why a project directory cannot be removed as a whole, or null when it can. */
@@ -171,9 +175,11 @@ export async function POST(req: Request) {
       return refusal(404, "project-not-found", "No sessions belong to this project");
     }
 
+    // The catalogue just read sessions out of this tree, so it exists; failing
+    // here means it became unreadable in between and nothing can be checked.
     const root = sessionsRoot();
     if (!root) {
-      return refusal(409, "symlink", "The sessions directory could not be resolved");
+      return refusal(500, "internal", "The sessions directory could not be resolved");
     }
 
     // Running sessions are refused, never killed: a wrapper mid-run owns its
@@ -192,23 +198,22 @@ export async function POST(req: Request) {
       );
     }
 
-    // Group by the directory each session actually lives in: one per cwd, and
-    // several for a project whose worktrees have their own sessions.
+    // Group by the project directory each session lives in: one per cwd, and
+    // several for a project whose worktrees have their own sessions. A nested
+    // pi-subagents child belongs to the same directory as its parent — it is
+    // removed with that parent's child tree rather than unlinked itself.
     const sessionsByDir = new Map<string, typeof projectSessions>();
     const skipped: ProjectDeleteFailure[] = [];
     for (const session of projectSessions) {
       if (!session.path) continue;
-      // A pi-subagents child transcript nests below its parent's directory and
-      // is removed with that parent's child tree, not as a session of its own.
-      if (isPiSubagentChildSessionPath(session.path)) continue;
-      const dir = projectDirOf(session.path, root);
-      if (!dir) {
+      const projectDir = projectDirOf(session.path, root);
+      if (!projectDir) {
         // A path the sessions root does not own: left alone, and reported
         // rather than deleted through a guessed directory.
         skipped.push({ path: session.path, error: `Not a project directory under ${SESSIONS_SUBDIR}` });
         continue;
       }
-      sessionsByDir.set(dir, [...(sessionsByDir.get(dir) ?? []), session]);
+      sessionsByDir.set(projectDir, [...(sessionsByDir.get(projectDir) ?? []), session]);
     }
     if (sessionsByDir.size === 0) {
       return refusal(404, "project-not-found", "No sessions belong to this project");
@@ -232,6 +237,14 @@ export async function POST(req: Request) {
 
     for (const [dir, dirSessions] of sessionsByDir) {
       for (const session of dirSessions) {
+        // A nested child has no file of its own to unlink: the child tree below
+        // carries it away, and it counts as deleted with that tree.
+        if (!isTopLevelSessionPath(session.path, dir)) {
+          deletedSessions += 1;
+          invalidateSessionPathCache(session.id);
+          invalidateSessionManagerCache(session.path);
+          continue;
+        }
         try {
           unlinkSync(session.path);
         } catch (error) {
