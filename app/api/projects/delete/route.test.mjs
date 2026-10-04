@@ -317,12 +317,12 @@ test("the route derives every removed path from an enumerated session, never fro
   assert.deepEqual(order, [...order].sort((a, b) => a - b), "403 before 415 before 400");
 });
 
-test("deletes through a symlinked agent directory, where the catalogue's paths are not real paths", { skip: process.platform === "win32" }, async (t) => {
+test("deletes through a symlinked agent directory, where the catalogue's paths are not real paths", { skip: process.platform === "win32" }, async () => {
   // macOS '/var' → '/private/var' and a symlinked '~/.pi' both put the agent
   // directory behind a link. The scanner builds session paths by joining the
   // path as given, so grouping against its realpath used to reject every
   // session and answer a false 404 on a project the sidebar was showing.
-  const { realAgentDir, repo, dirFor, session } = await fixture({ symlinkAgentDir: true });
+  const { realAgentDir, repo, session } = await fixture({ symlinkAgentDir: true });
   const file = await session(repo, "linked-agent-session");
 
   const projectKey = await projectKeyOf(repo);
@@ -336,8 +336,8 @@ test("deletes through a symlinked agent directory, where the catalogue's paths a
   assert.deepEqual(readdirSync(join(realAgentDir, "sessions")), [], "its project directory is gone");
 });
 
-test("unlinks a session file that is a symbolic link, leaving its target intact", { skip: process.platform === "win32" }, async (t) => {
-  const { repo, external, dirFor, session } = await fixture(t);
+test("unlinks a session file that is a symbolic link, leaving its target intact", { skip: process.platform === "win32" }, async () => {
+  const { repo, external, dirFor } = await fixture();
   const externalTarget = join(external, "target-session.jsonl");
   await writeFile(externalTarget, line({ type: "session", version: 3, id: "linked-session", cwd: repo, timestamp }));
   const linkPath = join(dirFor(repo), "linked-session.jsonl");
@@ -359,7 +359,7 @@ test("reports a session file it cannot remove and still deletes the project's ot
     t.skip("a read-only directory does not stop root or Windows");
     return;
   }
-  const { repo, worktree, dirFor, session } = await fixture(t);
+  const { repo, worktree, dirFor, session } = await fixture();
   const lockedDir = dirFor(repo);
   const locked = await session(repo, "locked-session");
   const worktreeFile = await session(worktree, "worktree-session");
@@ -382,7 +382,7 @@ test("reports a session file it cannot remove and still deletes the project's ot
 });
 
 test("refuses a project whose session has an idle but live wrapper, and deletes nothing", async (t) => {
-  const { repo, session } = await fixture(t);
+  const { repo, session } = await fixture();
   const idleFile = await session(repo, "idle-live", {}, "Open chat");
   const projectKey = await projectKeyOf(repo);
 
