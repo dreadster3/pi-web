@@ -91,7 +91,14 @@ test("a refusal is read as its reason, a busy project names its running sessions
     JSON.stringify({ deletedSessions: 4, removedDirs: 2, failures: [{ path: "/x", error: "nope" }] }),
     { status: 200 },
   ));
-  assert.deepEqual(ok, { ok: true, deletedSessions: 4, removedDirs: 2, failures: 1 });
+  // The paths, so the dialog can name what is still on disk.
+  assert.deepEqual(ok, { ok: true, deletedSessions: 4, removedDirs: 2, failedPaths: ["/x"] });
+
+  const clean = await deleteProject("/repo", async () => new Response(
+    JSON.stringify({ deletedSessions: 2, removedDirs: 1 }),
+    { status: 200 },
+  ));
+  assert.deepEqual(clean.failedPaths, [], "a clean delete reports nothing left behind");
 
   const thrown = await deleteProject("/repo", async () => { throw new Error("offline"); });
   assert.equal(thrown.ok, false);
@@ -117,6 +124,8 @@ test("the dialog states what goes, holds Delete until the name matches, and offe
   assert.match(text, /Delete project repo/);
   assert.match(text, /2 sessions in 2 directories/);
   assert.match(text, /Type repo to confirm/);
+  // The full path is shown, so two projects named "repo" are tellable apart.
+  assert.match(html, /project-delete-path[^>]*>[\s\S]*?\/repo/);
   // Nothing is typed yet, so the destructive button is disabled.
   assert.match(html, /<button[^>]*disabled[^>]*>Delete permanently<\/button>/);
   assert.match(html, /aria-modal="true"/);
@@ -141,4 +150,15 @@ test("the dialog owns its Esc handling and the sidebar keeps the destructive act
   // The dialog goes through a portal: the sidebar is a transformed, clipped
   // container, so a fixed overlay inside it would be positioned against it.
   assert.match(dialogSource, /return createPortal\(<ProjectDeleteDialogView \{\.\.\.props\} \/>, document\.body\)/);
+  // A wrong reason gets its own copy: a symlink refusal needs a different
+  // action from the user than a network failure.
+  assert.match(dialogSource, /failure\.reason === "symlink"\) return t\("sidebar\.deleteProjectSymlink"\)/);
+  // A partly failed delete reports the leftovers and closes only on request.
+  assert.match(dialogSource, /t\("sidebar\.deleteProjectPartial", \{ sessions: partial\.deletedSessions \}\)/);
+  assert.match(dialogSource, /t\("sidebar\.deleteProjectLeftovers", \{ paths: partial\.failedPaths\.join\(", "\) \}\)/);
+  assert.match(dialogSource, /const settled = partial !== null;/);
+  // A synchronous guard, so two triggers in one React batch post once.
+  assert.match(dialogSource, /if \(deletingRef\.current \|\| !canDelete\) return;/);
+  // The AppShell is told which sessions went, so an open pane is dropped.
+  assert.match(sidebarSource, /for \(const session of deleteProjectTargetSessions\) onSessionDeleted\?\.\(session\.id\)/);
 });

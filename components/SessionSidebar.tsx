@@ -1178,6 +1178,13 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     () => (deleteProjectKey ? recentProjects.find((project) => project.key === deleteProjectKey) ?? null : null),
     [deleteProjectKey, recentProjects],
   );
+  // The sessions of that project, so the app can be told exactly which ones
+  // went (an open pane of any of them must be dropped). Same key lookup as the
+  // target: never a path the dropdown happened to display.
+  const deleteProjectTargetSessions = useMemo(
+    () => (deleteProjectKey ? sessionsForProject(allSessions, deleteProjectKey) : []),
+    [deleteProjectKey, allSessions],
+  );
 
   // Per-project activity counts (running / unread) for the workspace selector.
   // Uses the same stable server key as the project list and filtering.
@@ -2324,12 +2331,18 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
           projectKey={deleteProjectKey}
           sessions={allSessions}
           onCancel={() => setDeleteProjectKey(null)}
-          onDeleted={() => {
+          onDeleted={(result) => {
             // The remembered session of this workspace is gone with it, and the
             // list must not show the project again from a stale scan.
             clearLastOpen(deleteProjectKey);
-            setDeleteProjectKey(null);
+            // Tell the app which sessions went, so an open chat pane of any of
+            // them is dropped and the workspace restore is invalidated: the
+            // project this deletes is usually the one whose chat is open.
+            for (const session of deleteProjectTargetSessions) onSessionDeleted?.(session.id);
             void loadSessions(true, true);
+            // A partly failed delete keeps the dialog open with the leftovers
+            // named, so only close it once nothing is left to report.
+            if (result.failedPaths.length === 0) setDeleteProjectKey(null);
           }}
         />
       )}

@@ -202,7 +202,9 @@ async function branchesRoute(request: MockRequest): Promise<Response> {
  */
 async function projectsRoute(request: MockRequest): Promise<Response> {
   const [, , action] = request.segments;
-  if (action !== "delete" || request.method !== "POST") return error("Not found", 404);
+  if (action !== "delete") return error("Not found", 404);
+  // The real route exports POST only; a wrong method is 405, not a missing path.
+  if (request.method !== "POST") return error("Method not allowed", 405);
   const body = await request.json<{ projectKey?: unknown }>();
   const projectKey = body.projectKey;
   if (typeof projectKey !== "string" || projectKey.length === 0) {

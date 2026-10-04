@@ -9,7 +9,7 @@ import type {
 export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 
 export type ProjectDeleteResult =
-  | { ok: true; deletedSessions: number; removedDirs: number; failures: number }
+  | { ok: true; deletedSessions: number; removedDirs: number; failedPaths: string[] }
   | { ok: false; reason?: ProjectDeleteErrorResponse["reason"]; runningSessionTitles: string[]; error: string };
 
 /**
@@ -37,7 +37,9 @@ function stringArray(value: unknown): string[] {
  * Delete every session of a project. The server finds the project again in its
  * session catalogue by this key, so the key never becomes a path here or
  * there. A refusal carries its reason, which the dialog turns into a message;
- * a busy project additionally names the sessions that are running.
+ * a live project additionally names the sessions that hold their files. A
+ * success still names whatever could not be removed, so a partial delete is
+ * not reported as a clean one.
  */
 export async function deleteProject(
   projectKey: string,
@@ -61,11 +63,16 @@ export async function deleteProject(
   const data: unknown = await response.json().catch(() => null);
   const record = data !== null && typeof data === "object" ? data as Record<string, unknown> : {};
   if (response.ok && typeof record.deletedSessions === "number") {
+    // The paths, not a count: the dialog names what is still on disk, which is
+    // the only way the user learns a stray file kept a directory alive.
+    const failures = Array.isArray(record.failures) ? record.failures : [];
     return {
       ok: true,
       deletedSessions: record.deletedSessions,
       removedDirs: typeof record.removedDirs === "number" ? record.removedDirs : 0,
-      failures: Array.isArray(record.failures) ? record.failures.length : 0,
+      failedPaths: failures
+        .map((failure) => (failure !== null && typeof failure === "object" ? (failure as { path?: unknown }).path : undefined))
+        .filter((path): path is string => typeof path === "string"),
     };
   }
 

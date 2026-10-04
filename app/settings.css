@@ -2510,6 +2510,29 @@
   font-weight: 700;
 }
 
+/* The full path, so two projects sharing a name are told apart. Wraps rather
+   than scrolls: an absolute path is long and the dialog is narrow. */
+.project-delete-path {
+  display: block;
+  margin-top: 8px;
+  padding: 7px 9px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.project-delete-path-label {
+  color: var(--text-dim);
+}
+
+.project-delete-partial-title {
+  font-weight: 600;
+}
+
 .project-delete-warning {
   margin: 7px 0 0;
   color: #ef4444;
