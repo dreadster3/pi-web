@@ -1179,7 +1179,15 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     ? allSessions.filter((session) => deleteProject.sessionIds.includes(session.id))
     : [];
 
-  /** Open the confirm dialog for a project, capturing it as the list shows it now. */
+  /**
+   * Open the confirm dialog for a project, capturing it as the list shows it
+   * now. The session ids are a frozen snapshot by design: the refresh a
+   * successful delete triggers drops the project from the list, so a live
+   * derivation would unmount the dialog mid-report. Freezing is safe because
+   * the delete itself is guarded server-side — a project with any alive
+   * wrapper is refused, so no id in this snapshot can be a session that is
+   * still open by the time the removal runs.
+   */
   const startDeleteProject = (project: RecentProject) => {
     setDeleteProject({
       key: project.key,

@@ -128,6 +128,14 @@ export function ProjectDeleteDialogView({
   // notice is not a dead end the user cannot dismiss.
   const settled = partial !== null;
 
+  // The footer's buttons are replaced when the report appears, so whatever had
+  // focus (the Delete button) is gone and focus would fall to the page behind
+  // the modal. Move it to the one button left.
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (partial) closeButtonRef.current?.focus({ preventScroll: true });
+  }, [partial]);
+
   return (
     <div
       role="presentation"
@@ -219,7 +227,7 @@ export function ProjectDeleteDialogView({
         </div>
         <div className="project-delete-footer">
           {settled ? (
-            <button type="button" className="project-delete-button" onClick={onCancel}>
+            <button ref={closeButtonRef} type="button" className="project-delete-button" onClick={onCancel}>
               {t("i18n.close")}
             </button>
           ) : (

@@ -444,7 +444,7 @@ export const zhTWLocale: LocalePlugin = {
     "sidebar.deleteProjectCounts": "{directories} 個目錄中的 {sessions} 個工作階段（含 worktree 與子代理執行）",
     "sidebar.deleteProjectTypeToConfirm": "請輸入 {project} 以確認",
     "sidebar.deleteProjectMismatch": "名稱不相符。",
-    "sidebar.deleteProjectRunning": "此專案有工作階段正在執行。請等它結束後再刪除專案。",
+    "sidebar.deleteProjectRunning": "此專案仍有工作階段處於開啟（或執行）狀態。請關閉它，或等它結束後再刪除專案。",
     "sidebar.deleteProjectRunningList": "執行中：{titles}",
     "sidebar.deleteProjectFailed": "無法刪除此專案。",
     "sidebar.deleteProjectPath": "專案路徑",

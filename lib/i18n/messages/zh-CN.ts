@@ -444,7 +444,7 @@ export const zhCNLocale: LocalePlugin = {
     "sidebar.deleteProjectCounts": "{directories} 个目录中的 {sessions} 个会话（含 worktree 与子智能体运行）",
     "sidebar.deleteProjectTypeToConfirm": "请输入 {project} 以确认",
     "sidebar.deleteProjectMismatch": "名称不匹配。",
-    "sidebar.deleteProjectRunning": "此项目有会话正在运行。请等它结束后再删除项目。",
+    "sidebar.deleteProjectRunning": "此项目仍有会话处于打开（或运行）状态。请关闭它，或等它结束后再删除项目。",
     "sidebar.deleteProjectRunningList": "运行中：{titles}",
     "sidebar.deleteProjectFailed": "无法删除该项目。",
     "sidebar.deleteProjectPath": "项目路径",

@@ -444,7 +444,7 @@ export const enLocale: LocalePlugin = {
     "sidebar.deleteProjectCounts": "{sessions} sessions in {directories} directories (worktrees and subagent runs included)",
     "sidebar.deleteProjectTypeToConfirm": "Type {project} to confirm",
     "sidebar.deleteProjectMismatch": "The name does not match.",
-    "sidebar.deleteProjectRunning": "A session of this project is running. Wait for it to finish, then delete the project.",
+    "sidebar.deleteProjectRunning": "A session of this project is still open (or running). Close it, or wait for it to finish, then delete the project.",
     "sidebar.deleteProjectRunningList": "Running: {titles}",
     "sidebar.deleteProjectFailed": "The project could not be deleted.",
     "sidebar.deleteProjectPath": "Project path",

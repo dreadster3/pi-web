@@ -159,6 +159,9 @@ test("the dialog owns its Esc handling and the sidebar keeps the destructive act
   assert.match(dialogSource, /t\("sidebar\.deleteProjectPartial", \{ sessions: partial\.deletedSessions \}\)/);
   assert.match(dialogSource, /t\("sidebar\.deleteProjectLeftovers", \{ paths: partial\.failedPaths\.join\(", "\) \}\)/);
   assert.match(dialogSource, /const settled = partial !== null;/);
+  // The footer's buttons are gone when the report appears, so focus is moved to
+  // the one that is left instead of falling to the page behind the modal.
+  assert.match(dialogSource, /if \(partial\) closeButtonRef\.current\?\.focus\(\{ preventScroll: true \}\)/);
   // A synchronous guard, so two triggers in one React batch post once.
   assert.match(dialogSource, /if \(deletingRef\.current \|\| !canDelete\) return;/);
   // The AppShell is told which sessions went, so an open pane is dropped.

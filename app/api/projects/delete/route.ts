@@ -21,6 +21,7 @@ import {
 } from "@/lib/session-reader";
 import { getAliveRpcSessionIds, getRpcSessionInfos, hasAliveRpcSessionForCwd } from "@/lib/rpc-manager";
 import { workspaceKeyOf } from "@/lib/workspace-memory";
+import type { SessionInfo } from "@/lib/types";
 import { invalidateProjectCache } from "@/lib/worktree";
 
 export const dynamic = "force-dynamic";
@@ -276,7 +277,7 @@ export async function POST(req: Request) {
       // below its parent carries it away. It is therefore counted only once
       // that tree's removal has succeeded, so `deletedSessions` never claims a
       // child that is still on disk.
-      const nestedChildren = [];
+      const nestedChildren: SessionInfo[] = [];
       for (const session of dirSessions) {
         if (isTopLevelSessionPath(session.path, dir)) continue;
         nestedChildren.push(session);
