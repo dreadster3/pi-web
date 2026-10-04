@@ -6,7 +6,7 @@ import { listSessionFamilies } from "@/lib/session-family";
 import { loadExplorerOpen, saveExplorerOpen } from "@/lib/file-explorer-state";
 import { dispatchSessionRowContextMenu } from "@/lib/session-row-context-menu";
 import { skillExpansionToCommand } from "@/lib/slash-display";
-import { getProjectActivity, getRecentProjects, sessionsForProject } from "@/lib/project-groups";
+import { getProjectActivity, getRecentProjects, sessionsForProject, type RecentProject } from "@/lib/project-groups";
 import { clearLastOpen, workspaceKeyOf } from "@/lib/workspace-memory";
 import { formatRelativeTime } from "@/lib/i18n/format";
 import { useI18n } from "@/hooks/useI18n";
@@ -424,7 +424,16 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   const [homeDir, setHomeDir] = useState<string>("");
   const [dropdownOpen, setDropdownOpen] = useState(false);
   // The project awaiting whole-project deletion confirmation, by its stable key.
-  const [deleteProjectKey, setDeleteProjectKey] = useState<string | null>(null);
+  // The project the confirm dialog is about, captured when it opens: the
+  // session list is refreshed the moment the delete succeeds, and the project
+  // it just removed is then absent from it — deriving the dialog's props from
+  // the live list would unmount the dialog exactly when a partial failure still
+  // has something to report.
+  const [deleteProject, setDeleteProject] = useState<{
+    key: string;
+    root: string;
+    sessionIds: string[];
+  } | null>(null);
   const [projectFilter, setProjectFilter] = useState("");
   const [wtFilter, setWtFilter] = useState("");
   const [customPathOpen, setCustomPathOpen] = useState(false);
@@ -1164,9 +1173,20 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   // The project the confirm dialog is about. Read from the loaded list by its
   // stable key — never from the path the dropdown happened to show, so a stale
   // display path cannot name a different project than the key deletes.
-  const deleteProjectTarget = deleteProjectKey
-    ? recentProjects.find((project) => project.key === deleteProjectKey) ?? null
-    : null;
+  // The dialog's counts come from the captured project's live rows: same ids,
+  // so the numbers stay what the sidebar was showing.
+  const deleteProjectSessions = deleteProject
+    ? allSessions.filter((session) => deleteProject.sessionIds.includes(session.id))
+    : [];
+
+  /** Open the confirm dialog for a project, capturing it as the list shows it now. */
+  const startDeleteProject = (project: RecentProject) => {
+    setDeleteProject({
+      key: project.key,
+      root: project.root,
+      sessionIds: sessionsForProject(allSessions, project.key).map((session) => session.id),
+    });
+  };
 
   // Per-project activity counts (running / unread) for the workspace selector.
   // Uses the same stable server key as the project list and filtering.
@@ -1527,7 +1547,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
-                    setDeleteProjectKey(selectedProject.key);
+                    startDeleteProject(selectedProject);
                     setDropdownOpen(false);
                   }}
                   title={t("sidebar.deleteProjectTitle", { project: projectDisplayName(selectedProject.root) })}
@@ -2306,18 +2326,24 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
         </div>
       )}
 
-      {deleteProjectKey && deleteProjectTarget && (
+      {deleteProject && (
         <ProjectDeleteDialog
-          projectRoot={deleteProjectTarget.root}
-          projectKey={deleteProjectKey}
-          sessions={allSessions}
-          onCancel={() => setDeleteProjectKey(null)}
-          onDeleted={() => {
+          projectRoot={deleteProject.root}
+          projectKey={deleteProject.key}
+          sessions={deleteProjectSessions}
+          onCancel={() => setDeleteProject(null)}
+          onDeleted={(result) => {
             // The remembered session of this workspace is gone with it, and the
             // list must not show the project again from a stale scan.
-            clearLastOpen(deleteProjectKey);
-            setDeleteProjectKey(null);
+            clearLastOpen(deleteProject.key);
+            // Tell the app which sessions went, so an open chat pane of any of
+            // them is dropped and the workspace restore is invalidated: the
+            // project this deletes is usually the one whose chat is open.
+            for (const sessionId of deleteProject.sessionIds) onSessionDeleted?.(sessionId);
             void loadSessions(true, true);
+            // A partly failed delete keeps the dialog open with the leftovers
+            // named, so only close it once nothing is left to report.
+            if (result.failedPaths.length === 0) setDeleteProject(null);
           }}
         />
       )}

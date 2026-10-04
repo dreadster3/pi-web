@@ -164,9 +164,14 @@ export function ProjectDeleteDialogView({
           <p id={BODY_ID} className="project-delete-warning">
             {t("sidebar.deleteProjectWarning")}
           </p>
-          <p className="project-delete-counts">
-            {t("sidebar.deleteProjectCounts", { sessions: counts.sessions, directories: counts.directories })}
-          </p>
+          {/* Once the delete has run, the rows it counted are gone from the
+              list: repeating the counts would read "0 sessions" over a notice
+              about what is still on disk. */}
+          {!settled && (
+            <p className="project-delete-counts">
+              {t("sidebar.deleteProjectCounts", { sessions: counts.sessions, directories: counts.directories })}
+            </p>
+          )}
           <label className="project-delete-label" htmlFor={INPUT_ID}>
             {t("sidebar.deleteProjectTypeToConfirm", { project: name })}
           </label>
@@ -177,7 +182,7 @@ export function ProjectDeleteDialogView({
             autoFocus
             autoComplete="off"
             spellCheck={false}
-            disabled={busy}
+            disabled={busy || settled}
             onChange={(event) => setTyped(event.target.value)}
             onKeyDown={(event) => {
               if (event.key === "Enter") {
@@ -186,7 +191,7 @@ export function ProjectDeleteDialogView({
               }
             }}
           />
-          {typed.length > 0 && !confirmationMatches(typed, projectRoot) && (
+          {!settled && typed.length > 0 && !confirmationMatches(typed, projectRoot) && (
             <p className="project-delete-mismatch" role="status">{t("sidebar.deleteProjectMismatch")}</p>
           )}
           {failure && (

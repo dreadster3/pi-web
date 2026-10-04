@@ -141,11 +141,13 @@ test("the dialog owns its Esc handling and the sidebar keeps the destructive act
   assert.match(dialogSource, /if \(!busyRef\.current\) onCancelRef\.current\(\);/);
   // On success the workspace memory is forgotten and the list refreshed; the
   // dialog closes either way.
-  assert.match(sidebarSource, /clearLastOpen\(deleteProjectKey\)/);
+  assert.match(sidebarSource, /clearLastOpen\(deleteProject\.key\)/);
   assert.match(sidebarSource, /void loadSessions\(true, true\)/);
-  // The project is named by its key, and the target is resolved from the
-  // loaded list rather than from the displayed path.
-  assert.match(sidebarSource, /recentProjects\.find\(\(project\) => project\.key === deleteProjectKey\)/);
+  // The project is named by its key, and captured from the loaded list when the
+  // dialog opens — deriving it live would unmount the dialog on the refresh the
+  // delete itself triggers.
+  assert.match(sidebarSource, /const startDeleteProject = useCallback\(\(project: RecentProject\) => \{/);
+  assert.match(sidebarSource, /sessionIds: sessionsForProject\(allSessions, project\.key\)/);
   assert.match(sidebarSource, /t\("sidebar\.deleteProject"\)/);
   // The dialog goes through a portal: the sidebar is a transformed, clipped
   // container, so a fixed overlay inside it would be positioned against it.
@@ -160,5 +162,5 @@ test("the dialog owns its Esc handling and the sidebar keeps the destructive act
   // A synchronous guard, so two triggers in one React batch post once.
   assert.match(dialogSource, /if \(deletingRef\.current \|\| !canDelete\) return;/);
   // The AppShell is told which sessions went, so an open pane is dropped.
-  assert.match(sidebarSource, /for \(const session of deleteProjectTargetSessions\) onSessionDeleted\?\.\(session\.id\)/);
+  assert.match(sidebarSource, /for \(const sessionId of deleteProject\.sessionIds\) onSessionDeleted\?\.\(sessionId\)/);
 });
