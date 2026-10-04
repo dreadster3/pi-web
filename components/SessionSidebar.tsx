@@ -7,7 +7,7 @@ import { loadExplorerOpen, saveExplorerOpen } from "@/lib/file-explorer-state";
 import { dispatchSessionRowContextMenu } from "@/lib/session-row-context-menu";
 import { skillExpansionToCommand } from "@/lib/slash-display";
 import { getProjectActivity, getRecentProjects, sessionsForProject } from "@/lib/project-groups";
-import { workspaceKeyOf } from "@/lib/workspace-memory";
+import { clearLastOpen, workspaceKeyOf } from "@/lib/workspace-memory";
 import { formatRelativeTime } from "@/lib/i18n/format";
 import { useI18n } from "@/hooks/useI18n";
 import { useResizablePanel } from "@/hooks/useResizablePanel";
@@ -16,6 +16,8 @@ import { DirectoryPicker } from "./DirectoryPicker";
 import { DismissButton } from "./DismissButton";
 import { FileExplorer, type FileExplorerHandle } from "./FileExplorer";
 import { SessionSearch } from "./SessionSearch";
+import { ProjectDeleteDialog } from "./ProjectDeleteDialog";
+import { projectDisplayName } from "./project-delete-helpers";
 
 // Fixed row height for the session list. SessionItem renders at exactly this
 // height, so the list can be windowed (only the visible slice is mounted).
@@ -421,6 +423,8 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   const [selectedCwd, setSelectedCwd] = useState<string | null>(null);
   const [homeDir, setHomeDir] = useState<string>("");
   const [dropdownOpen, setDropdownOpen] = useState(false);
+  // The project awaiting whole-project deletion confirmation, by its stable key.
+  const [deleteProjectKey, setDeleteProjectKey] = useState<string | null>(null);
   const [projectFilter, setProjectFilter] = useState("");
   const [wtFilter, setWtFilter] = useState("");
   const [customPathOpen, setCustomPathOpen] = useState(false);
@@ -1167,6 +1171,14 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   // Sessions of every worktree in the selected project are shown together
   const selectedProject = useMemo(() => projectFor(selectedCwd), [projectFor, selectedCwd]);
 
+  // The project the confirm dialog is about. Read from the loaded list by its
+  // stable key — never from the path the dropdown happened to show, so a stale
+  // display path cannot name a different project than the key deletes.
+  const deleteProjectTarget = useMemo(
+    () => (deleteProjectKey ? recentProjects.find((project) => project.key === deleteProjectKey) ?? null : null),
+    [deleteProjectKey, recentProjects],
+  );
+
   // Per-project activity counts (running / unread) for the workspace selector.
   // Uses the same stable server key as the project list and filtering.
   const projectActivity = useMemo(
@@ -1519,6 +1531,42 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                 </svg>
                 <span>{t("sidebar.customPath")}</span>
               </button>
+
+              {/* Deleting a whole project is destructive and rare: it lives in
+                  the dropdown, not the toolbar, and only for the project the
+                  sidebar is showing. */}
+              {selectedProject && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setDeleteProjectKey(selectedProject.key);
+                    setDropdownOpen(false);
+                  }}
+                  title={t("sidebar.deleteProjectTitle", { project: projectDisplayName(selectedProject.root) })}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 7,
+                    width: "100%",
+                    padding: "8px 10px",
+                    background: "none",
+                    border: "none",
+                    borderTop: "1px solid var(--border)",
+                    color: "#ef4444",
+                    cursor: "pointer",
+                    textAlign: "left",
+                    fontSize: 11,
+                  }}
+                >
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+                    <polyline points="3 6 5 6 21 6" />
+                    <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                    <path d="M10 11v6M14 11v6" />
+                    <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
+                  </svg>
+                  <span>{t("sidebar.deleteProject")}</span>
+                </button>
+              )}
           </AnimatedDropdown>
         </div>
 
@@ -2268,6 +2316,22 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
             </div>
           )}
         </div>
+      )}
+
+      {deleteProjectKey && deleteProjectTarget && (
+        <ProjectDeleteDialog
+          projectRoot={deleteProjectTarget.root}
+          projectKey={deleteProjectKey}
+          sessions={allSessions}
+          onCancel={() => setDeleteProjectKey(null)}
+          onDeleted={() => {
+            // The remembered session of this workspace is gone with it, and the
+            // list must not show the project again from a stale scan.
+            clearLastOpen(deleteProjectKey);
+            setDeleteProjectKey(null);
+            void loadSessions(true, true);
+          }}
+        />
       )}
     </div>
   );

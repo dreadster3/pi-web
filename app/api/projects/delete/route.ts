@@ -1,0 +1,287 @@
+import { NextResponse } from "next/server";
+import { lstatSync, readdirSync, realpathSync, rmdirSync, rmSync, unlinkSync } from "fs";
+import { dirname, isAbsolute, join, relative, resolve as resolvePath, sep } from "path";
+import type {
+  ProjectDeleteErrorResponse,
+  ProjectDeleteFailure,
+  ProjectDeleteRefusalReason,
+  ProjectDeleteResponse,
+} from "@/lib/api-types";
+import { hasJsonContentType, isApiRequestAllowed } from "@/lib/request-security";
+import { hasParentDirectorySegment } from "@/lib/path-security";
+import {
+  attachSessionProjectInfo,
+  getAgentDir,
+  invalidateSessionListCache,
+  invalidateSessionManagerCache,
+  invalidateSessionPathCache,
+  listAllSessions,
+  mergeSessionLists,
+  isPiSubagentChildSessionPath,
+  piSubagentChildRootDir,
+} from "@/lib/session-reader";
+import { getRpcSessionInfos, getRunningRpcSessionIds, hasBusyRpcSessionForCwd } from "@/lib/rpc-manager";
+import { workspaceKeyOf } from "@/lib/workspace-memory";
+import { invalidateProjectCache } from "@/lib/worktree";
+
+export const dynamic = "force-dynamic";
+
+// DELETE /api/projects/delete  body: { projectKey }
+//
+// "A project" is a derived grouping, not an entity on disk: every session
+// whose `cwd`/`projectRoot` resolve to one identity (`workspaceKeyOf`), across
+// every cwd it has sessions in — a git repo's linked worktrees are separate
+// session directories under the same project. So the request names the group
+// by its key and the server finds it again in the session catalogue; the
+// posted string is never turned into a path. Every directory removed is
+// `dirname()` of a real enumerated session, checked for containment under
+// `<agent-dir>/sessions` first, so nothing outside the sessions tree can be
+// reached even if the catalogue were wrong.
+//
+// Only session data goes: the project's own folder, its `.pi/`, `trust.json`,
+// and the hash-keyed stores under the agent directory are all left alone.
+
+const SESSIONS_SUBDIR = "sessions";
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function refusal(
+  status: number,
+  reason: ProjectDeleteRefusalReason,
+  error: string,
+  extra: { runningSessionTitles?: string[] } = {},
+) {
+  return NextResponse.json(
+    { error, reason, ...extra } satisfies ProjectDeleteErrorResponse,
+    { status },
+  );
+}
+
+/** The sessions root, resolved through links once, so containment is compared on real paths. */
+function sessionsRoot(): string | null {
+  const configured = resolvePath(join(getAgentDir(), SESSIONS_SUBDIR));
+  try {
+    return realpathSync(configured);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The per-cwd project directory of one session, or null when that directory
+ * is not exactly one level below the sessions root. Every path the route
+ * removes comes from here, so a malformed catalogue entry (a stray file, a
+ * nested child transcript) can never widen the removal.
+ */
+function projectDirOf(sessionPath: string, root: string): string | null {
+  const candidate = resolvePath(sessionPath);
+  if (hasParentDirectorySegment(candidate)) return null;
+  const dir = dirname(candidate);
+  const relativePath = relative(root, dir);
+  if (!relativePath || relativePath === ".." || relativePath.startsWith(`..${sep}`) || isAbsolute(relativePath)) {
+    return null;
+  }
+  // Exactly `<root>/<encoded-cwd>`: no deeper, and never the root itself.
+  if (relativePath.includes(sep)) return null;
+  return dir;
+}
+
+/** Why a project directory cannot be removed as a whole, or null when it can. */
+function dirRefusal(dir: string, root: string): "symlink" | "internal" | null {
+  let stats;
+  try {
+    stats = lstatSync(dir);
+  } catch (error) {
+    // Already gone is not a refusal: the sessions under it are gone too.
+    return (error as NodeJS.ErrnoException).code === "ENOENT" ? null : "internal";
+  }
+  // A link is removed as the link itself, never followed: `rm -r` through one
+  // would delete whatever it points at, outside the sessions tree.
+  if (stats.isSymbolicLink()) return "symlink";
+  let real: string;
+  try {
+    real = realpathSync(dir);
+  } catch {
+    return "internal";
+  }
+  const relativePath = relative(root, real);
+  if (!relativePath || relativePath === ".." || relativePath.startsWith(`..${sep}`) || isAbsolute(relativePath)) {
+    return "internal";
+  }
+  return null;
+}
+
+/** The sidebar's title for a session, matching what the row shows. */
+function sessionTitle(session: { name?: string; firstMessage?: string; id: string }): string {
+  const message = (session.firstMessage ?? "").trim();
+  return session.name?.trim() || message.slice(0, 50) || session.id.slice(0, 12);
+}
+
+/**
+ * What the project's directories hold beyond its session files: each top-level
+ * session's pi-subagents child tree (`<parentBase>/`) and the
+ * `subagent-artifacts/` transcripts beside it. Both are pi state under the
+ * project directory and go with it; the scan excludes artifacts, so they are
+ * found by reading the directory rather than from the catalogue.
+ */
+function nestedStateDirs(dir: string, sessionPaths: readonly string[]): string[] {
+  const dirs = new Set<string>();
+  for (const sessionPath of sessionPaths) {
+    const childRoot = piSubagentChildRootDir(sessionPath);
+    if (childRoot) dirs.add(childRoot);
+  }
+  try {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (entry.name === "subagent-artifacts") dirs.add(join(dir, entry.name));
+    }
+  } catch {
+    // Unreadable project directory: the session files under it are gone anyway.
+  }
+  return [...dirs];
+}
+
+export async function POST(req: Request) {
+  if (!isApiRequestAllowed(req)) return refusal(403, "request-denied", "Untrusted API request");
+  if (!hasJsonContentType(req)) {
+    return refusal(415, "content-type", "Content-Type must be application/json");
+  }
+
+  let body: { projectKey?: unknown } | null;
+  try {
+    body = await req.json();
+  } catch {
+    body = null;
+  }
+  const projectKey = body?.projectKey;
+  if (typeof projectKey !== "string" || projectKey.length === 0 || projectKey.length > 4096) {
+    return refusal(400, "invalid-request", "projectKey must be a non-empty string");
+  }
+
+  try {
+    // The catalogue decides which sessions are the project's. A posted key that
+    // matches no enumerated project is simply not one — including anything
+    // trying to name a path (`..`, a directory outside the sessions tree).
+    const sessions = await attachSessionProjectInfo(
+      mergeSessionLists(await listAllSessions({ force: true }), getRpcSessionInfos({ includeTransient: true })),
+    );
+    const projectSessions = sessions.filter((session) => workspaceKeyOf(session) === projectKey);
+    if (projectSessions.length === 0) {
+      return refusal(404, "project-not-found", "No sessions belong to this project");
+    }
+
+    const root = sessionsRoot();
+    if (!root) {
+      return refusal(409, "symlink", "The sessions directory could not be resolved");
+    }
+
+    // Running sessions are refused, never killed: a wrapper mid-run owns its
+    // file, and deleting it under the run would leave a running agent writing
+    // to a removed path. Every cwd of the project counts, not just the one the
+    // sidebar selected — a worktree session runs its own wrapper.
+    const projectCwds = [...new Set(projectSessions.map((session) => session.cwd).filter(Boolean))];
+    const runningIds = new Set(getRunningRpcSessionIds());
+    const running = projectSessions.filter((session) => runningIds.has(session.id));
+    if (running.length > 0 || projectCwds.some((cwd) => hasBusyRpcSessionForCwd(cwd))) {
+      return refusal(
+        409,
+        "session-busy",
+        "A session of this project is running. Wait for it to finish before deleting the project.",
+        { runningSessionTitles: running.map(sessionTitle) },
+      );
+    }
+
+    // Group by the directory each session actually lives in: one per cwd, and
+    // several for a project whose worktrees have their own sessions.
+    const sessionsByDir = new Map<string, typeof projectSessions>();
+    const skipped: ProjectDeleteFailure[] = [];
+    for (const session of projectSessions) {
+      if (!session.path) continue;
+      // A pi-subagents child transcript nests below its parent's directory and
+      // is removed with that parent's child tree, not as a session of its own.
+      if (isPiSubagentChildSessionPath(session.path)) continue;
+      const dir = projectDirOf(session.path, root);
+      if (!dir) {
+        // A path the sessions root does not own: left alone, and reported
+        // rather than deleted through a guessed directory.
+        skipped.push({ path: session.path, error: `Not a project directory under ${SESSIONS_SUBDIR}` });
+        continue;
+      }
+      sessionsByDir.set(dir, [...(sessionsByDir.get(dir) ?? []), session]);
+    }
+    if (sessionsByDir.size === 0) {
+      return refusal(404, "project-not-found", "No sessions belong to this project");
+    }
+
+    // Every directory is checked before anything is removed, so a link among
+    // them refuses the whole request instead of half-deleting the project.
+    for (const dir of sessionsByDir.keys()) {
+      const refusalReason = dirRefusal(dir, root);
+      if (refusalReason === "symlink") {
+        return refusal(409, "symlink", "A project directory is a symbolic link, so it was not removed");
+      }
+      if (refusalReason === "internal") {
+        return refusal(500, "internal", `Project directory is outside ${SESSIONS_SUBDIR}: ${dir}`);
+      }
+    }
+
+    const failures: ProjectDeleteFailure[] = [...skipped];
+    let deletedSessions = 0;
+    let removedDirs = 0;
+
+    for (const [dir, dirSessions] of sessionsByDir) {
+      for (const session of dirSessions) {
+        try {
+          unlinkSync(session.path);
+        } catch (error) {
+          // A file already gone is the outcome asked for; anything else is
+          // reported and does not stop the rest of the project.
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+            failures.push({ path: session.path, error: errorMessage(error) });
+            continue;
+          }
+        }
+        deletedSessions += 1;
+        invalidateSessionPathCache(session.id);
+        invalidateSessionManagerCache(session.path);
+      }
+
+      // pi-subagents child trees and artifact transcripts: not part of the
+      // session graph (a foreground child carries no relation metadata), so
+      // they are removed by directory rather than through the cascade above.
+      for (const nestedDir of nestedStateDirs(dir, dirSessions.map((session) => session.path))) {
+        try {
+          rmSync(nestedDir, { recursive: true, force: true });
+        } catch (error) {
+          failures.push({ path: nestedDir, error: errorMessage(error) });
+        }
+      }
+
+      // The project directory itself: every session file in it is gone, so it
+      // is empty apart from pi state that is itself project-scoped. `rmdirSync`
+      // refuses a directory that still holds anything, which is what keeps an
+      // unexpected file safe.
+      try {
+        rmdirSync(dir);
+        removedDirs += 1;
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code !== "ENOENT") failures.push({ path: dir, error: errorMessage(error) });
+      }
+    }
+
+    invalidateSessionListCache();
+    // The project's cwd may no longer resolve as a git repo (a removed
+    // worktree), and grouping must not keep answering from a stale resolution.
+    invalidateProjectCache();
+
+    return NextResponse.json({
+      deletedSessions,
+      removedDirs,
+      ...(failures.length > 0 ? { failures } : {}),
+    } satisfies ProjectDeleteResponse);
+  } catch (error) {
+    return refusal(500, "internal", errorMessage(error));
+  }
+}
