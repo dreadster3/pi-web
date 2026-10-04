@@ -71,7 +71,7 @@ test("the counts name the sessions and the directories the server will remove", 
   assert.deepEqual(projectDeleteCounts(sessions, "/missing"), { sessions: 0, directories: 0 });
 });
 
-test("a refusal is read as its reason, a busy project names its running sessions, and a network failure still answers", async (t) => {
+test("a refusal is read as its reason, a busy project names its running sessions, and a network failure still answers", async () => {
   const calls = [];
   const fakeFetch = async (input, init) => {
     calls.push({ input, init });
