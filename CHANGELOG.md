@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.0](https://github.com/dreadster3/pi-web/compare/v0.1.0...v0.2.0) (2026-10-05)
+
+
+### Features
+
+* test ([14e4d8c](https://github.com/dreadster3/pi-web/commit/14e4d8c9f96225e0e16ab0320bee308a33b350ff))
+
 ## [0.1.0](https://github.com/dreadster3/pi-web/compare/v0.0.4...v0.1.0) (2026-10-03)
 
 
