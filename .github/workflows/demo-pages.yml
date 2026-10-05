@@ -35,7 +35,7 @@ jobs:
           cache-dependency-path: demo/package-lock.json
       - id: pages
         if: github.event_name != 'pull_request'
-        uses: actions/configure-pages@v5
+        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6
       - run: npm ci
       - run: npm run lint
       - run: npm run build
