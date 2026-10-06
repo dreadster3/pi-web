@@ -196,10 +196,17 @@ the runner will silently discard.
   have no pause path.** The first offers no detached handle; the second
   predates the inbox; on Windows signals cannot be delivered. Each answers
   with an actionable unsupported error, never a silent no-op.
-- **The UI derives state from data it already has.** Controls are gated on
-  `relation.runId` and run status (`pause` and `steer` for running; `steer`
-  for paused), disabled with a tooltip otherwise, and refresh through the
-  existing conventions (`trackPiSubagentSessionRefetches`, `refreshKey`).
+- **The UI derives state from data it already has.** The chat composer is the
+  control surface: Send steers the run behind the open child transcript and Stop
+  pauses it, the same gesture and affordance as a main-agent prompt and abort.
+  The gate reads the run's own `state` — `relation.status` seeds the first paint,
+  `GET /api/subagents/runs?runId=` keeps it honest while the child chat is open —
+  and a terminal run clears it so the composer falls back to a plain prompt. A
+  control response refetches through the existing conventions
+  (`onSubagentRunControl` → `refreshKey`).
+- **No extra control UI.** Steering is a normal message send inside the
+  subagent's chat, and Stop is the existing composer affordance: no per-run menu,
+  button or panel row is added, and the Agents panel stays a read-only view.
 - **What Pi Web reads stays a guess about someone else's format.** `pid`,
   `pidNamespaceScope`, `state`, and `steering` stay optional in a versioned
   artifact (`lifecycleArtifactVersion`); the parser tolerates their absence
@@ -210,8 +217,9 @@ the runner will silently discard.
 Implementation must also update: (a) `AGENTS.md` — file-map entries for
 `app/api/subagents/runs/` (route + test) and the pid/inbox parsing in
 `lib/pi-subagents-runs.ts`; (b) `docs/agents/subagents.md` — a short section
-covering pause-as-inbox/signal-fallback, steer-as-inbox,
-paused-run parent-mediated resume, and absence behavior (see this ADR);
+covering the chat composer as the control surface, pause-as-inbox/signal-fallback,
+steer-as-inbox and its `targetIndex`, paused-run parent-mediated resume, the
+read-only single-run status read, and absence behavior (see this ADR);
 (c) i18n — every new user-facing string added to **all three** of
 `lib/i18n/messages/{en,zh-CN,zh-TW}.ts` (enforced by
 `lib/i18n/registry.test.mjs`); (d) verification — `node_modules/.bin/tsc

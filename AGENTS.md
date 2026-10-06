@@ -126,6 +126,7 @@ lib/
   subagent-overrides.ts     setSubagentOverrideDisabled — user settings agentOverrides writer; plus lib/subagent-profile-precedence.ts and lib/pi-subagents-*.ts
   pi-subagents-runs.ts      async run status.json parsing (run id, pid, pid namespace scope, steering receipts)
   pi-subagents-control.ts   pause/steer one async run: control inbox (or signal fallback), observed, never assumed
+  pi-subagents-run-control.ts client gate + control requests for the chat composer (+ test)
   file-access.ts            allowed file roots for /api/files and worktrees
   file-upload-client.ts     browser upload to /api/files ?type=upload, shared by the explorer and chat drops
   linked-directory.ts       directory links leading outside the allowed roots + the allow-link check
