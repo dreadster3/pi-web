@@ -1794,11 +1794,23 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const handleSend = useCallback(async (message: string, images?: AttachedImage[]) => {
     const trimmedMessage = message.trim();
     if (!trimmedMessage && !images?.length) return;
+    const isSlashCommandPrompt = !images?.length && trimmedMessage.startsWith("/");
+    const isBashCommand = !images?.length && trimmedMessage.startsWith("!");
+    const steering = Boolean(controlledRunId) && piSubagentRunSteerable(observedRunState);
+    // Local gestures stay local: `!cmd` runs in this chat's own shell arm below,
+    // and a `/command` the composer did not handle has no expansion inside a
+    // steer, so it is refused rather than injected as literal text. Both dispatch
+    // before the steer branch, the way they do in every other transcript.
+    if (steering && isSlashCommandPrompt) {
+      restoreSubmission(message, images, composerDraftKey);
+      addNotice({ type: "error", message: translate?.("chat.subagent.commandOnly") ?? "chat.subagent.commandOnly" });
+      return;
+    }
     // A child transcript's chat steers the run that backs it instead of prompting
     // the child's own (idle) wrapper: one message, the same gesture as the main
     // chat, and the run decides whether it lands as a live steer or a resume. The
     // route refuses a terminal run, which is when a plain prompt is right again.
-    if (controlledRunId && piSubagentRunSteerable(observedRunState)) {
+    if (steering && !isBashCommand) {
       if (!trimmedMessage) {
         restoreSubmission(message, images, composerDraftKey);
         addNotice({ type: "error", message: translate?.("chat.subagent.textOnly") ?? "chat.subagent.textOnly" });
@@ -1837,9 +1849,6 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         return;
       }
     }
-    const isSlashCommandPrompt = !images?.length && trimmedMessage.startsWith("/");
-
-    const isBashCommand = !images?.length && trimmedMessage.startsWith("!");
     if (isBashCommand) {
       const isExcluded = trimmedMessage.startsWith("!!");
       const bashCmd = (isExcluded ? trimmedMessage.slice(2) : trimmedMessage.slice(1)).trim();

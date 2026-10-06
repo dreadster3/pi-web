@@ -31,9 +31,21 @@ test("a child chat's Send steers the run, and Stop pauses it", () => {
     hookSource.indexOf("const handleSend = useCallback"),
     hookSource.indexOf("const executeBash = useCallback"),
   );
+  // A local gesture is dispatched before the redirect, so a bang or an unexpanded
+  // slash command is never injected into the run as literal text.
+  assert.match(
+    sendSource,
+    /if \(steering && isSlashCommandPrompt\) \{[\s\S]*?chat\.subagent\.commandOnly[\s\S]*?restoreSubmission\([\s\S]*?return;/,
+  );
+  assert.match(
+    sendSource,
+    /if \(isBashCommand\) \{[\s\S]*?executeBashRef\.current\?\.\(bashCmd, isExcluded\)[\s\S]*?return;/,
+  );
   // The redirect precedes the main-chat running guard: the child wrapper is idle,
   // so a steer must not fall through to a duplicate prompt against it.
-  assert.match(sendSource, /if \(controlledRunId && piSubagentRunSteerable\(observedRunState\)\)[\s\S]*?sendRunControl\("steer"/);
+  assert.match(sendSource, /if \(steering && !isBashCommand\) \{[\s\S]*?sendRunControl\("steer"/);
+  // The refusal is decided before the steer write, so no slash text can reach it.
+  assert.ok(sendSource.indexOf("chat.subagent.commandOnly") < sendSource.indexOf('sendRunControl("steer"'));
   // The viewed child of a chain is addressed by its own step index.
   assert.match(sendSource, /targetIndex: controlledStepIndex/);
   // A refusal is restored to the composer, exactly like a rejected main-chat prompt.

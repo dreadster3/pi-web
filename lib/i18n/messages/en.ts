@@ -688,6 +688,7 @@ export const enLocale: LocalePlugin = {
     "chat.subagent.steerFailed": "Steering failed; the run refused the message",
     "chat.subagent.steerSent": "Sent to the parent session",
     "chat.subagent.textOnly": "Steering carries text only; remove the attachments",
+    "chat.subagent.commandOnly": "Commands cannot be steered; send them once the run has finished",
     "chat.stop": "Stop",
     "chat.disableSound": "Disable completion sound",
     "chat.enableSound": "Enable completion sound",

@@ -688,6 +688,7 @@ export const zhTWLocale: LocalePlugin = {
     "chat.subagent.steerFailed": "插話失敗，該執行拒絕了這則訊息",
     "chat.subagent.steerSent": "已傳送給父會話",
     "chat.subagent.textOnly": "插話只支援文字，請移除附件",
+    "chat.subagent.commandOnly": "無法向執行插話傳送命令，請在執行結束後傳送",
     "chat.stop": "停止",
     "chat.disableSound": "關閉完成提示音",
     "chat.enableSound": "開啟完成提示音",

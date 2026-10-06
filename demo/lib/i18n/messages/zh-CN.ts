@@ -688,6 +688,7 @@ export const zhCNLocale: LocalePlugin = {
     "chat.subagent.steerFailed": "插话失败，该运行拒绝了这条消息",
     "chat.subagent.steerSent": "已发送给父会话",
     "chat.subagent.textOnly": "插话只支持文字，请移除附件",
+    "chat.subagent.commandOnly": "无法向运行插话发送命令，请在运行结束后发送",
     "chat.stop": "停止",
     "chat.disableSound": "关闭完成提示音",
     "chat.enableSound": "开启完成提示音",
