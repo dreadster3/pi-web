@@ -1820,7 +1820,10 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     // chat, and the run decides whether it lands as a live steer or a resume. The
     // route refuses a terminal run, which is when a plain prompt is right again.
     if (steering && !isBashCommand) {
-      if (!trimmedMessage) {
+      // A steer carries text only, so any attachment is refused here rather than
+      // dropped: the notice says why and the whole submission returns to the
+      // composer, attached files included.
+      if (images?.length) {
         restoreSubmission(message, images, composerDraftKey);
         addNotice({ type: "error", message: translate?.("chat.subagent.textOnly") ?? "chat.subagent.textOnly" });
         return;

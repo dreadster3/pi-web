@@ -55,6 +55,12 @@ test("a child chat's Send steers the run, and Stop pauses it", () => {
   assert.ok(sendSource.indexOf("chat.subagent.commandOnly") < sendSource.indexOf('sendRunControl("steer"'));
   // The viewed child of a chain is addressed by its own step index.
   assert.match(sendSource, /targetIndex: controlledStepIndex/);
+  // Attachments are refused and restored, never silently dropped: a steer carries
+  // text only, so the notice names why and the whole submission returns.
+  assert.match(
+    sendSource,
+    /if \(images\?\.length\) \{[\s\S]*?chat\.subagent\.textOnly[\s\S]*?restoreSubmission\(message, images, composerDraftKey\)[\s\S]*?return;/,
+  );
   // A refusal is restored to the composer, exactly like a rejected main-chat prompt.
   assert.match(sendSource, /if \(!result\.ok\) \{[\s\S]*?addNotice\(\{ type: "error", message: result\.failure\.error \}\)[\s\S]*?restoreSubmission\(/);
 
