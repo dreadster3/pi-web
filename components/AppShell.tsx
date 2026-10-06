@@ -226,6 +226,12 @@ export function AppShell() {
     )) setRefreshKey((k) => k + 1);
   }, [subagentRuns]);
   const [sessionKey, setSessionKey] = useState(0);
+  // A pause/steer from a child chat changes that run's own `status.json`, which is
+  // what the composer gate reads; re-read the list the gate is seeded from, exactly
+  // like the live widget does for a run start or a terminal transition.
+  const handleSubagentRunControl = useCallback(() => {
+    setRefreshKey((k) => k + 1);
+  }, []);
   const sessionScrollPositionsRef = useRef(new Map<string, ChatScrollPosition>());
   const handleSessionScrollPositionChange = useCallback((sessionId: string, position: ChatScrollPosition) => {
     sessionScrollPositionsRef.current.set(sessionId, position);
@@ -2502,6 +2508,7 @@ export function AppShell() {
               onScrollPositionChange={handleSessionScrollPositionChange}
               sessionRunning={Boolean(selectedSession && runningSessionIds.has(selectedSession.id))}
               onSubagentRunsChange={handleSubagentRunsChange}
+              onSubagentRunControl={handleSubagentRunControl}
               newSessionCwd={effectiveNewSessionCwd}
               newSessionDraftKey={newSessionDraftKey}
               newSessionContextBar={newSessionContextBar}

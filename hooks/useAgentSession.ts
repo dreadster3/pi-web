@@ -31,6 +31,15 @@ import { isNestedToolExecutionEvent, isSystemMessageEvent } from "@/lib/agent-ev
 import { getToolExecutionProgress } from "@/lib/tool-execution-progress";
 import { CODEMODE_TOOL_NAME, getCodemodeProgress } from "@/lib/codemode-view";
 import { updateExtensionWidgets } from "@/lib/extension-widgets";
+import {
+  fetchPiSubagentRunStatus,
+  piSubagentRunControlNotice,
+  piSubagentRunLive,
+  piSubagentRunSteerable,
+  sendPiSubagentRunControl,
+  type PiSubagentRunControlResponse,
+} from "@/lib/pi-subagents-run-control";
+import type { PiSubagentRunState } from "@/lib/pi-subagents-snapshot";
 import { bareMcpOpensSettings } from "@/lib/mcp-command";
 import type { SettingsSection } from "@/lib/settings-navigation";
 import {
@@ -196,6 +205,10 @@ export interface UseAgentSessionOptions {
   initialNewSessionChoices?: NewSessionChoices | null;
   /** A fresh composer reports its own model and reasoning picks, on mount and as they change. */
   onNewSessionChoicesChange?: (choices: NewSessionChoices) => void;
+  /** A pause/steer changed the run's own `status.json`; the list the gate is built from must refetch. */
+  onSubagentRunControl?: () => void;
+  /** Translator for the control notices this hook raises. */
+  translate?: (key: string, params?: Record<string, string | number>) => string;
 }
 
 export type ThinkingLevelOption = "auto" | "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
@@ -232,6 +245,9 @@ const EVENT_STREAM_RECONNECT_DELAY_MS = 1_000;
 const SESSION_LEASE_RENEW_INTERVAL_MS = 30_000;
 // Retry temporary model-list failures without requiring a page refresh.
 const MODELS_RETRY_DELAYS_MS = [2_000, 5_000, 10_000];
+// One run's `status.json` is small and cheap to re-read; the child chat keeps the
+// composer gate honest with the same cadence ChatWindow uses for the widget poll.
+const SUBAGENT_RUN_POLL_MS = 4_000;
 const MAX_NOTICES = 5;
 const NOTICE_VISIBLE_MS = 5000;
 const NOTICE_EXIT_ANIMATION_MS = 180;
@@ -338,7 +354,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const {
     session, newSessionCwd, newSessionDraftKey, onAgentEnd, onAttentionNeeded, onSessionCreated, onSessionForked,
     modelsRefreshKey, onBranchDataChange, onSystemPromptChange, onSystemToolsChange, onSystemInfoLoaderChange, onSessionStatsPanelOpen,
-    onOpenSettings,
+    onOpenSettings, onSubagentRunControl, translate,
   } = opts;
 
   const isNew = session === null && newSessionCwd !== null;
@@ -566,7 +582,95 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     }
   }, [newSessionDraftKey, opts.chatInputRef, resolveComposerDraftKey]);
 
-  // Editing a past message only prefills the composer; the branch moves when it is sent,
+  // ── pi-subagents run control (docs/adr/0007-subagents-control-bridging.md) ──
+  // A child transcript opened in this chat is backed by a detached pi-subagents
+  // run, and the package scopes its `subagent-async` widget to the launching
+  // session, so this chat has no live source of its own. The relation's run id is
+  // the handle; the read-only GET is polled while the document is visible and the
+  // sidebar's `relation.status` seeds the first paint until the first answer lands.
+  const controlledRunId = session?.relation?.kind === "subagent" ? session.relation.runId : undefined;
+  const controlledStepIndex = session?.relation?.kind === "subagent" ? session.relation.stepIndex : undefined;
+  const [runState, setRunState] = useState<{ runId: string; state: PiSubagentRunState } | null>(null);
+  // The sidebar row's own status, until a poll answers for this run.
+  const seededRunState = session?.relation?.kind === "subagent"
+    ? (session.relation.status === "running" ? "running" as const : undefined)
+    : undefined;
+  const observedRunState: PiSubagentRunState | undefined = runState && runState.runId === controlledRunId
+    ? runState.state
+    : seededRunState;
+
+  useEffect(() => {
+    if (!controlledRunId) return;
+    let stopped = false;
+    let controller: AbortController | null = null;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    // A hidden tab has nothing to gate; the visibilitychange nudge re-reads once
+    // the tab is visible again, the convention the sidebar's poll uses too.
+    const schedule = () => {
+      if (timer) clearTimeout(timer);
+      if (stopped || document.visibilityState !== "visible") return;
+      timer = setTimeout(() => void poll(), SUBAGENT_RUN_POLL_MS);
+    };
+    const poll = async () => {
+      if (stopped || document.visibilityState !== "visible") return;
+      controller?.abort();
+      const current = new AbortController();
+      controller = current;
+      try {
+        const result = await fetchPiSubagentRunStatus(controlledRunId, current.signal);
+        if (stopped || controller !== current) return;
+        // A run gone or unreadable stops the poll: the composer falls back to the
+        // normal prompt, which is the right thing for a finished transcript.
+        if (result.ok) setRunState({ runId: controlledRunId, state: result.data.state });
+      } catch {
+        // Keep the last known state; the next visible-tab poll retries.
+      } finally {
+        if (controller === current) controller = null;
+        schedule();
+      }
+    };
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        void poll();
+        return;
+      }
+      if (timer) clearTimeout(timer);
+      timer = null;
+      controller?.abort();
+      controller = null;
+    };
+    void poll();
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      stopped = true;
+      if (timer) clearTimeout(timer);
+      controller?.abort();
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [controlledRunId]);
+
+  /**
+   * One control action against the run behind this chat. A refusal is a notice,
+   * exactly like a rejected main-chat prompt; on success the caller refetches the
+   * list the gate reads, because the action changed the run's own `status.json`.
+   */
+  const sendRunControl = useCallback(async (
+    action: "pause" | "steer",
+    options: { message?: string; targetIndex?: number } = {},
+  ): Promise<PiSubagentRunControlResponse> => {
+    if (!controlledRunId) throw new Error("This chat has no pi-subagents run to control");
+    const result = await sendPiSubagentRunControl(controlledRunId, action, options);
+    if (result.ok) {
+      // A delivered interrupt that landed is the one state change we observed
+      // ourselves; everything else is left to the next poll or list read.
+      if (action === "pause" && result.data.transitioned) {
+        setRunState({ runId: controlledRunId, state: "paused" });
+      }
+      onSubagentRunControl?.();
+    }
+    return result;
+  }, [controlledRunId, onSubagentRunControl]);
+
   // so cancelling or reloading never hides the rest of the conversation.
   const [editEntryId, setEditEntryId] = useState(() => {
     const sid = session?.id;
@@ -1690,6 +1794,34 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const handleSend = useCallback(async (message: string, images?: AttachedImage[]) => {
     const trimmedMessage = message.trim();
     if (!trimmedMessage && !images?.length) return;
+    // A child transcript's chat steers the run that backs it instead of prompting
+    // the child's own (idle) wrapper: one message, the same gesture as the main
+    // chat, and the run decides whether it lands as a live steer or a resume. The
+    // route refuses a terminal run, which is when a plain prompt is right again.
+    if (controlledRunId && piSubagentRunSteerable(observedRunState)) {
+      if (!trimmedMessage) {
+        restoreSubmission(message, images, composerDraftKey);
+        addNotice({ type: "error", message: translate?.("chat.subagent.textOnly") ?? "chat.subagent.textOnly" });
+        return;
+      }
+      try {
+        const result = await sendRunControl("steer", {
+          message,
+          ...(controlledStepIndex !== undefined ? { targetIndex: controlledStepIndex } : {}),
+        });
+        if (!result.ok) {
+          addNotice({ type: "error", message: result.failure.error });
+          restoreSubmission(message, images, composerDraftKey);
+          return;
+        }
+        if (translate) addNotice({ type: "info", message: piSubagentRunControlNotice(result.data, translate) });
+      } catch (error) {
+        console.error("Failed to steer the subagent run:", error);
+        addNotice({ type: "error", message: error instanceof Error ? error.message : String(error) });
+        restoreSubmission(message, images, composerDraftKey);
+      }
+      return;
+    }
     if (agentRunningRef.current || bashRunningRef.current) {
       restoreSubmission(message, images, composerDraftKey);
       return;
@@ -1815,7 +1947,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       setAgentPhase(null);
       dispatch({ type: "end" });
     }
-  }, [isNew, newSessionCwd, newSessionModel, session, ensureNewSession, ensureEventsConnected, promoteNewSession, waitForPromptSettlement, addNotice, cancelEventStreamGrace, closeEvents, composerDraftKey, reconcileAgentState, restoreSubmission, editEntryId, setEdit]);
+  }, [isNew, newSessionCwd, newSessionModel, session, ensureNewSession, ensureEventsConnected, promoteNewSession, waitForPromptSettlement, addNotice, cancelEventStreamGrace, closeEvents, composerDraftKey, reconcileAgentState, restoreSubmission, editEntryId, setEdit, controlledRunId, controlledStepIndex, observedRunState, sendRunControl, translate]);
 
   const executeBash = useCallback(async (command: string, excludeFromContext: boolean) => {
     if (agentRunningRef.current || bashRunningRef.current) return;
@@ -1846,6 +1978,19 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   executeBashRef.current = executeBash;
 
   const handleAbort = useCallback(async () => {
+    // Stop on a child chat pauses the run behind it, mirroring the main chat's
+    // Stop affordance; the child wrapper itself is idle and has nothing to abort.
+    if (controlledRunId && piSubagentRunLive(observedRunState)) {
+      try {
+        const result = await sendRunControl("pause");
+        if (!result.ok) addNotice({ type: "error", message: result.failure.error });
+        else if (translate) addNotice({ type: "info", message: piSubagentRunControlNotice(result.data, translate) });
+      } catch (error) {
+        console.error("Failed to pause the subagent run:", error);
+        addNotice({ type: "error", message: error instanceof Error ? error.message : String(error) });
+      }
+      return;
+    }
     const sid = sessionIdRef.current;
     if (!sid) return;
     if (bashRunningRef.current) {
@@ -1861,7 +2006,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     } catch (e) {
       console.error("Failed to abort:", e);
     }
-  }, []);
+  }, [addNotice, controlledRunId, observedRunState, sendRunControl, translate]);
 
   const handleFork = useCallback(async (entryId: string) => {
     if (bashRunningRef.current) return;
@@ -2738,6 +2883,10 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     handleSend, handleAbort, handleFork, handleNavigate, handleModelChange,
     handleCompact, handleSteer, handleFollowUp, handlePromptWithStreamingBehavior, handleAbortCompaction,
     handleRecallQueue,
+    // Subagent run control; only set while a pi-subagents child transcript is open.
+    subagentRunControlled: Boolean(controlledRunId),
+    subagentRunSteerable: Boolean(controlledRunId) && piSubagentRunSteerable(observedRunState),
+    subagentRunLive: Boolean(controlledRunId) && piSubagentRunLive(observedRunState),
     handleBuiltinSlashCommand,
     handleEditContent,
     // Present only while a history edit is pending.

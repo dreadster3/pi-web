@@ -67,6 +67,8 @@ interface Props {
   onSessionStatsChange?: (stats: SessionStatsInfo | null) => void;
   /** Live pi-subagents runs parsed from the `subagent-async` extension widget. */
   onSubagentRunsChange?: (runs: PiSubagentSnapshotNode[]) => void;
+  /** A pause/steer from this chat changed a run's own `status.json`; refetch the list. */
+  onSubagentRunControl?: () => void;
   onSessionStatsPanelOpen?: () => void;
   /** Opens Settings on a section: a bare `/mcp` that pi's built-in MCP extension owns opens Settings › MCP. */
   onOpenSettings?: (section: SettingsSection) => void;
@@ -259,7 +261,7 @@ function ProcessDetailsGroup({ messageCount, toolCallCount, defaultExpanded = fa
   );
 }
 
-export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initialScrollPosition, onScrollPositionChange, sessionRunning, newSessionCwd, newSessionDraftKey, newSessionContextBar, initialNewSessionChoices, onNewSessionChoicesChange, onAgentEnd, onAttentionNeeded, onSessionCreated, onSessionForked, modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSystemToolsChange, onSystemInfoLoaderChange, onSessionStatsChange, onSubagentRunsChange, onSessionStatsPanelOpen, onOpenSettings, onContextUsageChange, onOpenFile, onFilesUploaded, onOpenSession, onAskInNewChat, quoteSelectionEnabled = false, initialPrompt, onInitialPromptConsumed, soundEnabled = true, onSoundToggle, playDoneSound = () => {}, unlockAudio }: Props) {
+export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initialScrollPosition, onScrollPositionChange, sessionRunning, newSessionCwd, newSessionDraftKey, newSessionContextBar, initialNewSessionChoices, onNewSessionChoicesChange, onAgentEnd, onAttentionNeeded, onSessionCreated, onSessionForked, modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSystemToolsChange, onSystemInfoLoaderChange, onSessionStatsChange, onSubagentRunsChange, onSubagentRunControl, onSessionStatsPanelOpen, onOpenSettings, onContextUsageChange, onOpenFile, onFilesUploaded, onOpenSession, onAskInNewChat, quoteSelectionEnabled = false, initialPrompt, onInitialPromptConsumed, soundEnabled = true, onSoundToggle, playDoneSound = () => {}, unlockAudio }: Props) {
   const { t } = useI18n();
   const isMobile = useIsMobile();
   const completionNotificationsEnabled = session?.relation?.kind !== "subagent";
@@ -312,13 +314,19 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
     handleBuiltinSlashCommand,
     handleToolPresetChange, handleThinkingLevelChange, handleSetDefaultModel, handleSetDefaultThinkingLevel, loadSlashCommands, scrollUserMsgToTop,
     loadContext, activeLeafId, scrollToBottom, scrollToMessage,
+    subagentRunLive,
   } = useAgentSession({
     session, sessionRunning, newSessionCwd, newSessionDraftKey, initialNewSessionChoices, onNewSessionChoicesChange, onAgentEnd: wrappedOnAgentEnd, onAttentionNeeded, onSessionCreated, onSessionForked,
     modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSystemToolsChange, onSystemInfoLoaderChange, onSessionStatsPanelOpen,
     onOpenSettings,
     deferInitialScroll: Boolean(pendingScrollRestore),
+    onSubagentRunControl,
+    translate: t,
   });
   const sessionBusy = agentRunning || bashRunning;
+  // A child chat backed by a live run keeps Stop meaningful without a streaming
+  // session, so the affordance and the Esc shortcut cover both cases.
+  const stopAffordance = sessionBusy || subagentRunLive;
   const [quotedSelection, setQuotedSelection] = useState<{
     text: string;
     top: number;
@@ -479,8 +487,8 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
 
   // Register the abort handler for the global Esc shortcut
   useEffect(() => {
-    registerAbortHandler(sessionBusy ? handleAbort : null);
-  }, [sessionBusy, handleAbort]);
+    registerAbortHandler(stopAffordance ? handleAbort : null);
+  }, [stopAffordance, handleAbort]);
 
   // --- Lazy-load historical messages ---
   // Only render the last N messages initially. When the user scrolls to the
@@ -1000,6 +1008,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
       onFollowUp={agentRunning ? handleFollowUp : undefined}
       onPromptWithStreamingBehavior={agentRunning ? handlePromptWithStreamingBehavior : undefined}
       isStreaming={sessionBusy}
+      subagentRunLive={subagentRunLive}
       model={displayModelValue}
       isAutoModelSelection={isAutoModelSelection}
       modelNames={modelNames}
