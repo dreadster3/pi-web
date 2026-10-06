@@ -101,7 +101,8 @@ re-reads `status.json` per request (no caching, like the other run readers).
 
 ```jsonc
 // request
-{ "runId": "<runId>", "action": "pause" | "steer", "message": "<steer only>" }
+{ "runId": "<runId>", "action": "pause" | "steer", "message": "<steer only>",
+  "targetIndex": "<steer only, one child of a chain>" }
 
 // 200, pause
 { "ok": true, "action": "pause", "runId": "…", "state": "paused",
@@ -116,6 +117,23 @@ re-reads `status.json` per request (no caching, like the other run readers).
 { "ok": true, "action": "steer", "runId": "…", "delivery": "parent-session",
   "delivered": true }
 ```
+
+`targetIndex` names **one** child of a run for `steer`, overriding the
+default all-running set: the chat steers exactly the transcript it is showing.
+It is a single non-negative integer ≤ 1 000 000 (never an array — the package's
+`targetIndexes` stays internal to the auto-selection), accepted for `steer`
+only, and validated against `run.steps` before any write: an out-of-range index
+is a `409 target_out_of_range`, and a child that is not `running`/`queued` is a
+`409 target_not_steerable`. On the paused arm it becomes the `index` of the
+parent-mediated `resume` call.
+
+`GET /api/subagents/runs?runId=` — one run's observed state, **read-only**:
+`{ "ok": true, "runId": "…", "state": "…", "mode": "…", "steps": ["running", …] }`.
+A child transcript's composer has no `subagent-async` widget of its own (the
+package scopes that widget to the launching session), so it polls this to gate
+Send/Stop; `steps` is the artifact's own order, which is what `targetIndex`
+addresses. It resolves and parses through the same code as the control actions
+and refuses with the same `{error, code, reason}` shape, writing nothing.
 
 `runId` must match `[A-Za-z0-9._-]+`, reject the `.`/`..` segments explicitly,
 and resolve to `<root>/async-subagent-runs/<runId>/` inside a resolved temp
@@ -135,11 +153,11 @@ parent, not that the model has acted on it.
 
 | HTTP | `code` | `reason` |
 | --- | --- | --- |
-| 400 | `invalid_request` | `run_id_invalid`; `body_invalid` (non-JSON request body); `action_invalid`; `message_required` (steer, no non-empty `message`); `steer_too_large` (> 128 KiB) |
+| 400 | `invalid_request` | `run_id_invalid`; `body_invalid` (non-JSON request body); `action_invalid`; `message_required` (steer, no non-empty `message`); `steer_too_large` (> 128 KiB); `target_index_invalid` (`targetIndex` not a single non-negative integer, or sent for `pause`) |
 | 404 | `run_not_found` | `no_run_roots` (no run root, or the env override absent); `no_status` (run dir or `status.json` missing) |
 | 409 | `run_unsupported` | `no_pid` (foreground run, or a package version that omits `pid`/inbox — both arms need one of them) |
 | 409 | `run_not_pausable` | `not_running`; `pid_unverifiable` (signal fallback with recorded vs current `pidNamespaceScope` disagree) |
-| 409 | `steer_rejected` | `inbox_closed` (`steer-inbox-closed.json` present); `no_running_steps` (running run with no steerable child) |
+| 409 | `steer_rejected` | `inbox_closed` (`steer-inbox-closed.json` present); `no_running_steps` (running run with no steerable child); `target_out_of_range` (`targetIndex` ≥ `run.steps.length`); `target_not_steerable` (the named child is not `running`/`queued`) |
 | 409 | `parent_session_not_live` | `no_live_wrapper` (paused-run steer; parent on disk, not alive in this server) |
 | 502 | `interrupt_failed` | `write_failed` (inbox write, e.g. EACCES/ENOSPC); `eperm`; `esrch` (pid gone, signal fallback); `enosys` (platform cannot deliver signals) |
 | 502 | `steer_failed` | `write_failed` (inbox write); `send_failed` (live parent refused the prompt — busy turn, lost admission race, session copy in flight) |

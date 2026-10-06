@@ -386,6 +386,8 @@ export interface SessionInfo {
         /** Snapshot node id of this child's step within that run; one run backs
          *  every child of a chain, so this is what disambiguates the rows. */
         stepRunId?: string;
+        /** Index of this child's step in `runId`; what a targeted steer addresses. */
+        stepIndex?: number;
       };
   /** Main repo root shared by all worktrees of this cwd (cwd itself for non-git dirs).
    *  Always set by the server; optional because the client builds transient

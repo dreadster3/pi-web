@@ -374,6 +374,9 @@ function derivePiSubagentRelation(
     ...(matched
       ? { stepRunId: matched.step.workflowKey ?? matched.step.runId ?? `step:${matched.stepIndex}` }
       : {}),
+    // The step this transcript is: what a chat send addresses when the run is a
+    // chain and more than one child is live. Not derivable client-side.
+    ...(matched ? { stepIndex: matched.stepIndex } : {}),
   };
 }
 

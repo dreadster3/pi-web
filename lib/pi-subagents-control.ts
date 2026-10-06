@@ -180,17 +180,24 @@ function steerTargetIndexes(run: PiSubagentRun): number[] | null {
   return null;
 }
 
-function validSteerRequest(request: { id: string; ts: number; message: string; targetIndexes: number[]; source: string }): boolean {
+function validSteerRequest(request: { id: string; ts: number; message: string; targetIndex?: number; targetIndexes?: number[]; source: string }): boolean {
   return /^\S+$/.test(request.id)
     && request.id.length <= MAX_STEER_REQUEST_ID_LENGTH
     && Number.isFinite(request.ts)
     && request.ts > 0
     && Boolean(request.message.trim())
     && Buffer.byteLength(request.message, "utf8") <= SUBAGENTS_MAX_STEER_MESSAGE_BYTES
-    && request.targetIndexes.length > 0
-    && request.targetIndexes.length <= 1_000
-    && new Set(request.targetIndexes).size === request.targetIndexes.length
-    && request.targetIndexes.every((index) => Number.isInteger(index) && index >= 0 && index <= 1_000_000)
+    // The package's own rule: one index or a list, never both.
+    && (request.targetIndex !== undefined
+      ? request.targetIndexes === undefined
+        && Number.isInteger(request.targetIndex)
+        && request.targetIndex >= 0
+        && request.targetIndex <= 1_000_000
+      : Array.isArray(request.targetIndexes)
+        && request.targetIndexes.length > 0
+        && request.targetIndexes.length <= 1_000
+        && new Set(request.targetIndexes).size === request.targetIndexes.length
+        && request.targetIndexes.every((index) => Number.isInteger(index) && index >= 0 && index <= 1_000_000))
     && Boolean(request.source.trim())
     && request.source.length <= 256;
 }
@@ -200,13 +207,30 @@ async function steerRunning(
   location: PiSubagentRunLocation,
   run: PiSubagentRun,
   message: string,
+  /** The viewed child of a chain; absent means the package's own all-running set. */
+  targetIndex?: number,
 ): Promise<SubagentsControlResult> {
   if (existsSync(join(controlDir(location.runDir), "steer-inbox-closed.json"))) {
     return fail(409, `Run ${runId} no longer accepts steering requests.`, "steer_rejected", "inbox_closed");
   }
-  const targets = steerTargetIndexes(run);
-  if (!targets) {
-    return fail(409, `Run ${runId} has no running child to steer.`, "steer_rejected", "no_running_steps");
+  let targets: number[];
+  if (targetIndex !== undefined) {
+    // Mirror the package's steer action: the index must resolve to a child that
+    // can still take a message, so one chain step is steered, not every running one.
+    const step = run.steps[targetIndex];
+    if (!step) {
+      return fail(409, `Index ${targetIndex} is out of range for run ${runId}.`, "steer_rejected", "target_out_of_range");
+    }
+    if (step.status !== "running" && step.status !== "queued") {
+      return fail(409, `Child ${targetIndex} of run ${runId} is ${step.status} and cannot be steered.`, "steer_rejected", "target_not_steerable");
+    }
+    targets = [targetIndex];
+  } else {
+    const auto = steerTargetIndexes(run);
+    if (!auto) {
+      return fail(409, `Run ${runId} has no running child to steer.`, "steer_rejected", "no_running_steps");
+    }
+    targets = auto;
   }
 
   const request = {
@@ -214,7 +238,7 @@ async function steerRunning(
     id: subagentsControlDeps.randomId(),
     ts: subagentsControlDeps.now(),
     message: message.trim(),
-    targetIndexes: targets,
+    ...(targetIndex !== undefined ? { targetIndex } : { targetIndexes: targets }),
     source: "pi-web",
   };
   // The same validity rules the package enforces: a request it would discard is
@@ -264,16 +288,19 @@ async function steerRunning(
  * live RPC session gets a prompt telling it to resume the run. Never
  * `startRpcSession` — starting a parent as a side effect of steering is out of scope.
  */
-async function steerPaused(runId: string, run: PiSubagentRun, message: string): Promise<SubagentsControlResult> {
+async function steerPaused(runId: string, run: PiSubagentRun, message: string, targetIndex?: number): Promise<SubagentsControlResult> {
   const parentPath = run.parentSessionPath;
   const parentId = parentPath ? await resolveSessionIdByPath(parentPath) : undefined;
   const parent = parentId ? getRpcSession(parentId) : undefined;
   if (!parent?.isAlive()) {
     return fail(409, `The parent session of run ${runId} is not live in this server.`, "parent_session_not_live", "no_live_wrapper");
   }
+  // `resume` takes the same target params as the package's steer action, so the
+  // viewed child of a chain is named by `index`; absent, the package picks.
+  const target = targetIndex !== undefined ? `, index: ${targetIndex}` : "";
   const command = {
     type: "prompt",
-    message: `[pi-web] Steer the paused pi-subagents run: call subagent({ action: "resume", id: ${JSON.stringify(runId)}, message: ${JSON.stringify(message)} }).`,
+    message: `[pi-web] Steer the paused pi-subagents run: call subagent({ action: "resume", id: ${JSON.stringify(runId)}${target}, message: ${JSON.stringify(message)} }).`,
   };
   try {
     await parent.send(command);
@@ -291,7 +318,7 @@ async function steerPaused(runId: string, run: PiSubagentRun, message: string): 
  * per the ADR's interface section. The caller only serializes the result.
  */
 export async function subagentsControl(
-  input: { runId: unknown; action: unknown; message?: unknown },
+  input: { runId: unknown; action: unknown; message?: unknown; targetIndex?: unknown },
 ): Promise<SubagentsControlResult> {
   if (!isValidAsyncRunId(input.runId)) {
     return fail(400, "runId must match [A-Za-z0-9._-]+ and not be a path segment.", "invalid_request", "run_id_invalid");
@@ -309,6 +336,21 @@ export async function subagentsControl(
       return fail(400, "message exceeds 128 KiB.", "invalid_request", "steer_too_large");
     }
     message = input.message;
+  }
+  // The chat steers exactly the child it is showing, so a caller-supplied index
+  // wins over the package's all-running default. One integer, per the package.
+  let targetIndex: number | undefined;
+  if (input.targetIndex !== undefined) {
+    if (
+      input.action !== "steer"
+      || typeof input.targetIndex !== "number"
+      || !Number.isInteger(input.targetIndex)
+      || input.targetIndex < 0
+      || input.targetIndex > 1_000_000
+    ) {
+      return fail(400, "targetIndex must be a non-negative integer and is only accepted for steer.", "invalid_request", "target_index_invalid");
+    }
+    targetIndex = input.targetIndex;
   }
 
   // Validation above never touches the filesystem; resolution is the first read.
@@ -328,8 +370,32 @@ export async function subagentsControl(
       // Pre-0.71 artifact layout: no inbox to write, and signals cannot steer.
       return fail(409, `Run ${runId} predates the control inbox and cannot be steered.`, "run_unsupported", "no_pid");
     }
-    return steerRunning(runId, location, run, message);
+    return steerRunning(runId, location, run, message, targetIndex);
   }
-  if (run.state === "paused") return steerPaused(runId, run, message);
+  if (run.state === "paused") return steerPaused(runId, run, message, targetIndex);
   return fail(409, `Run ${runId} is ${run.state} and has no steerable child.`, "steer_rejected", "no_running_steps");
+}
+
+/**
+ * One run's observed state, read-only: the chat gates its composer on this while
+ * a child transcript is open, where no `subagent-async` widget of its own exists.
+ * Same resolver and parser as the control actions, and the same refusal shape.
+ */
+export function subagentsRunStatus(input: { runId: unknown }): SubagentsControlResult {
+  if (!isValidAsyncRunId(input.runId)) {
+    return fail(400, "runId must match [A-Za-z0-9._-]+ and not be a path segment.", "invalid_request", "run_id_invalid");
+  }
+  const runId = input.runId;
+  const location = resolveAsyncRunLocation(runId);
+  if (!location) {
+    const hasRoot = resolveTempRoots().some((root) => existsSync(root));
+    return fail(404, `No pi-subagents async run '${runId}' was found.`, "run_not_found", hasRoot ? "no_status" : "no_run_roots");
+  }
+  const run = readAsyncRunStatus(location.statusPath, runId);
+  if (!run) {
+    return fail(404, `Run '${runId}' has no readable status.json.`, "run_not_found", "no_status");
+  }
+  // Step statuses let the chat gate the one child it shows; `mode` tells it
+  // whether that child can be addressed by index at all.
+  return { status: 200, body: { ok: true, runId, state: run.state, mode: run.mode, steps: run.steps.map((step) => step.status) } };
 }

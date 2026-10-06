@@ -11,7 +11,7 @@ const jiti = createJiti(import.meta.url, {
   alias: { "@": process.cwd() },
   interopDefault: true,
 });
-const { POST } = await jiti.import("./route.ts");
+const { POST, GET } = await jiti.import("./route.ts");
 const { subagentsControlDeps, resetSubagentsControlDeps } = await jiti.import("@/lib/pi-subagents-control");
 
 const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
@@ -56,6 +56,12 @@ async function post(body) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   }));
+  return { status: response.status, body: await response.json() };
+}
+async function get(runId) {
+  const url = new URL("http://localhost/api/subagents/runs");
+  if (runId !== undefined) url.searchParams.set("runId", runId);
+  const response = await GET(new Request(url));
   return { status: response.status, body: await response.json() };
 }
 
@@ -399,4 +405,132 @@ test("leaves no request file behind when the steer was refused", async (t) => {
 
   await post({ runId: "run-done", action: "steer", message: "keep going" });
   assert.deepEqual(readdirSync(join(runDir("run-done"), "control", "steer-requests")), []);
+});
+
+test("steer with targetIndex writes the package's singular field, not the list", async (t) => {
+  const { writeRun, runDir } = fixture(t);
+  const dir = writeRun("run-1", runningRun({
+    mode: "chain",
+    steps: [{ agent: "scout", status: "running" }, { agent: "worker", status: "running" }],
+  }));
+  let written;
+  inject({
+    writeJson: (path, value) => {
+      written = { path, value };
+      writeFileSync(join(runDir("run-1"), "status.json"), JSON.stringify(runningRun({
+        mode: "chain",
+        steps: [{ agent: "scout", status: "running" }, { agent: "worker", status: "running" }],
+        steering: { requested: 1, recent: [{ id: "req-1", targets: [{ index: 1, state: "delivered" }] }] },
+    })));
+    },
+  });
+
+  const { status, body } = await post({ runId: "run-1", action: "steer", message: "keep going", targetIndex: 1 });
+  assert.equal(status, 200);
+  // One viewed child, never the package's all-running default.
+  assert.deepEqual(written.value, {
+    type: "steer",
+    id: "req-1",
+    ts: 1_700_000_000_000,
+    message: "keep going",
+    targetIndex: 1,
+    source: "pi-web",
+  });
+  assert.equal(written.path, join(dir, "control", "steer-requests", `1700000000000-${Buffer.from("req-1").toString("base64url")}.json`));
+  assert.deepEqual(body.unsteerableSteps, [0], "the step the request did not target cannot take it");
+});
+
+test("steer refuses an out-of-range or finished targetIndex and a malformed one", async (t) => {
+  const { writeRun, runDir } = fixture(t);
+  writeRun("run-1", runningRun({
+    mode: "chain",
+    steps: [{ agent: "scout", status: "running" }, { agent: "worker", status: "complete" }],
+  }));
+  inject({});
+
+  let response = await post({ runId: "run-1", action: "steer", message: "keep going", targetIndex: 9 });
+  assert.equal(response.status, 409);
+  assert.equal(response.body.code, "steer_rejected");
+  assert.equal(response.body.reason, "target_out_of_range");
+
+  response = await post({ runId: "run-1", action: "steer", message: "keep going", targetIndex: 1 });
+  assert.equal(response.status, 409);
+  assert.equal(response.body.reason, "target_not_steerable");
+
+  for (const targetIndex of [-1, 1.5, "0", null, 1_000_001]) {
+    response = await post({ runId: "run-1", action: "steer", message: "keep going", targetIndex });
+    assert.equal(response.status, 400, String(targetIndex));
+    assert.equal(response.body.reason, "target_index_invalid");
+  }
+  response = await post({ runId: "run-1", action: "pause", targetIndex: 0 });
+  assert.equal(response.status, 400, "targetIndex belongs to steer only");
+  assert.equal(response.body.reason, "target_index_invalid");
+  assert.deepEqual(readdirSync(join(runDir("run-1"), "control", "steer-requests")), [], "a refused target writes nothing");
+});
+
+test("GET reports one run's observed state and per-step statuses, read-only", async (t) => {
+  const { writeRun, runDir } = fixture(t);
+  writeRun("run-1", runningRun({
+    mode: "chain",
+    steps: [{ agent: "scout", status: "running" }, { agent: "worker", status: "complete" }],
+  }));
+  inject({});
+
+  const { status, body } = await get("run-1");
+  assert.equal(status, 200);
+  // The order of `steps` is what the chat indexes a steer with, so it must be the
+  // artifact's own order, not a filtered one.
+  assert.deepEqual(body, { ok: true, runId: "run-1", state: "running", mode: "chain", steps: ["running", "complete"] });
+  assert.deepEqual(readdirSync(join(runDir("run-1"), "control", "steer-requests")), [], "a read writes nothing");
+});
+
+test("GET refuses a bad run id and answers absence with the same shape as POST", async (t) => {
+  const { root, writeRun } = fixture(t);
+  writeRun("run-1", runningRun());
+  inject({});
+
+  // A query string cannot carry a non-string, so 7 would arrive as the (valid) id "7".
+  for (const runId of [undefined, "", "..", "../run-1", "run 1"]) {
+    const { status, body } = await get(runId);
+    assert.equal(status, 400, String(runId));
+    assert.equal(body.code, "invalid_request");
+    assert.equal(body.reason, "run_id_invalid");
+  }
+  const numeric = await get(7);
+  assert.equal(numeric.status, 404, "7 is read as the id \"7\", which has no run");
+  assert.equal(numeric.body.reason, "no_status");
+
+  let response = await get("run-gone");
+  assert.equal(response.status, 404);
+  assert.equal(response.body.reason, "no_status");
+
+  process.env.PI_SUBAGENTS_TEMP_ROOT = join(root, "not-installed");
+  response = await get("run-1");
+  assert.equal(response.status, 404);
+  assert.equal(response.body.reason, "no_run_roots");
+});
+
+test("steer on a chain without targetIndex still targets every running step", async (t) => {
+  const { writeRun, runDir } = fixture(t);
+  const dir = writeRun("run-1", runningRun({
+    mode: "chain",
+    steps: [{ agent: "scout", status: "running" }, { agent: "worker", status: "running" }],
+  }));
+  let written;
+  inject({
+    writeJson: (path, value) => {
+      written = { path, value };
+      writeFileSync(join(runDir("run-1"), "status.json"), JSON.stringify(runningRun({
+        mode: "chain",
+        steps: [{ agent: "scout", status: "running" }, { agent: "worker", status: "running" }],
+        steering: { requested: 1, recent: [{ id: "req-1", targets: [{ index: 0, state: "delivered" }, { index: 1, state: "delivered" }] }] },
+      })));
+    },
+  });
+
+  const { status, body } = await post({ runId: "run-1", action: "steer", message: "keep going" });
+  assert.equal(status, 200);
+  assert.deepEqual(written.value.targetIndexes, [0, 1]);
+  assert.equal(written.path, join(dir, "control", "steer-requests", `1700000000000-${Buffer.from("req-1").toString("base64url")}.json`));
+  assert.deepEqual(body.unsteerableSteps, []);
 });

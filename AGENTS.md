@@ -88,7 +88,7 @@ app/api/
   subagents/tools/route.ts         GET selectable child tools (builtin + extension)
   subagents/overrides/route.ts     PUT user-scope agentOverrides disable switch
   subagents/eject/route.ts         POST copy a catalog agent into a writable agent dir
-  subagents/runs/route.ts          POST pause | steer one pi-subagents async run (+ route.test.mjs)
+  subagents/runs/route.ts          GET one run's state | POST pause | steer one pi-subagents async run (+ route.test.mjs)
   web-auth/route.ts                GET status | POST login | DELETE logout (browser password)
   provider-usage/query/route.ts    POST provider usage quotas
   push/config/route.ts             GET VAPID public key
