@@ -685,6 +685,7 @@ export const zhCNLocale: LocalePlugin = {
     "chat.subagent.pausePending": "已请求中断，该运行仍在工作",
     "chat.subagent.steerDelivered": "插话已送达",
     "chat.subagent.steerQueued": "插话已排队",
+    "chat.subagent.steerFailed": "插话失败，该运行拒绝了这条消息",
     "chat.subagent.steerSent": "已发送给父会话",
     "chat.subagent.textOnly": "插话只支持文字，请移除附件",
     "chat.stop": "停止",

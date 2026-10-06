@@ -1678,7 +1678,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           restoreSubmission(message, images, composerDraftKey);
           return;
         }
-        if (translate) addNotice({ type: "info", message: piSubagentRunControlNotice(result.data, translate) });
+        if (translate) addNotice(piSubagentRunControlNotice(result.data, translate));
       } catch (error) {
         console.error("Failed to steer the subagent run:", error);
         addNotice({ type: "error", message: error instanceof Error ? error.message : String(error) });
@@ -1848,7 +1848,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       try {
         const result = await sendRunControl("pause");
         if (!result.ok) addNotice({ type: "error", message: result.failure.error });
-        else if (translate) addNotice({ type: "info", message: piSubagentRunControlNotice(result.data, translate) });
+        else if (translate) addNotice(piSubagentRunControlNotice(result.data, translate));
       } catch (error) {
         console.error("Failed to pause the subagent run:", error);
         addNotice({ type: "error", message: error instanceof Error ? error.message : String(error) });

@@ -685,6 +685,7 @@ export const zhTWLocale: LocalePlugin = {
     "chat.subagent.pausePending": "已請求中斷，該執行仍在工作",
     "chat.subagent.steerDelivered": "插話已送達",
     "chat.subagent.steerQueued": "插話已排隊",
+    "chat.subagent.steerFailed": "插話失敗，該執行拒絕了這則訊息",
     "chat.subagent.steerSent": "已傳送給父會話",
     "chat.subagent.textOnly": "插話只支援文字，請移除附件",
     "chat.stop": "停止",

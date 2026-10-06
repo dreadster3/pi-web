@@ -685,6 +685,7 @@ export const enLocale: LocalePlugin = {
     "chat.subagent.pausePending": "Interrupt requested; the run is still working",
     "chat.subagent.steerDelivered": "Steering delivered",
     "chat.subagent.steerQueued": "Steering queued",
+    "chat.subagent.steerFailed": "Steering failed; the run refused the message",
     "chat.subagent.steerSent": "Sent to the parent session",
     "chat.subagent.textOnly": "Steering carries text only; remove the attachments",
     "chat.stop": "Stop",

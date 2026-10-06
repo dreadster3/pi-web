@@ -106,16 +106,29 @@ export async function sendPiSubagentRunControl(
   return { ok: true, data: body as unknown as PiSubagentRunControlResult };
 }
 
-/** One line for a control outcome, from the fields the route actually returns. */
+/** One notice for a control outcome, from the fields the route actually returns. */
 export function piSubagentRunControlNotice(
   result: PiSubagentRunControlResult,
   t: (key: string, params?: Record<string, string | number>) => string,
-): string {
+): { type: "info" | "error"; message: string } {
   if (result.action === "pause") {
-    return result.transitioned ? t("chat.subagent.paused") : t("chat.subagent.pausePending");
+    return {
+      type: "info",
+      message: result.transitioned ? t("chat.subagent.paused") : t("chat.subagent.pausePending"),
+    };
   }
-  if (result.delivery === "parent-session") return t("chat.subagent.steerSent");
-  return result.steeringState === "delivered"
-    ? t("chat.subagent.steerDelivered")
-    : t("chat.subagent.steerQueued");
+  if (result.delivery === "parent-session") {
+    return { type: "info", message: t("chat.subagent.steerSent") };
+  }
+  // A refused delivery is the one outcome that is not "the runner has it": the
+  // route reports it as a 200, so only this mapping keeps it from reading queued.
+  if (result.steeringState === "failed") {
+    return { type: "error", message: t("chat.subagent.steerFailed") };
+  }
+  return {
+    type: "info",
+    message: result.steeringState === "delivered"
+      ? t("chat.subagent.steerDelivered")
+      : t("chat.subagent.steerQueued"),
+  };
 }
