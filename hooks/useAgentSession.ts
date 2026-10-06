@@ -34,7 +34,7 @@ import { updateExtensionWidgets } from "@/lib/extension-widgets";
 import {
   fetchPiSubagentRunStatus,
   piSubagentRunControlNotice,
-  piSubagentRunLive,
+  piSubagentRunPausable,
   piSubagentRunSteerable,
   sendPiSubagentRunControl,
   type PiSubagentRunControlResponse,
@@ -1998,7 +1998,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const handleAbort = useCallback(async () => {
     // Stop on a child chat pauses the run behind it, mirroring the main chat's
     // Stop affordance; the child wrapper itself is idle and has nothing to abort.
-    if (controlledRunId && piSubagentRunLive(observedRunState)) {
+    if (controlledRunId && piSubagentRunPausable(observedRunState)) {
       try {
         const result = await sendRunControl("pause");
         if (!result.ok) addNotice({ type: "error", message: result.failure.error });
@@ -2904,7 +2904,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     // Subagent run control; only set while a pi-subagents child transcript is open.
     subagentRunControlled: Boolean(controlledRunId),
     subagentRunSteerable: Boolean(controlledRunId) && piSubagentRunSteerable(observedRunState),
-    subagentRunLive: Boolean(controlledRunId) && piSubagentRunLive(observedRunState),
+    subagentRunPausable: Boolean(controlledRunId) && piSubagentRunPausable(observedRunState),
     handleBuiltinSlashCommand,
     handleEditContent,
     // Present only while a history edit is pending.

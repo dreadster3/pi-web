@@ -50,8 +50,11 @@ interface Props {
   onFollowUp?: (message: string, images?: AttachedImage[]) => void;
   onPromptWithStreamingBehavior?: (message: string, behavior: "steer" | "followUp", images?: AttachedImage[]) => void;
   isStreaming: boolean;
-  /** A pi-subagents run backs this chat and is still live, so Stop pauses it. */
-  subagentRunLive?: boolean;
+  /**
+   * A pi-subagents run backs this chat and can be paused right now, so Stop
+   * pauses it (the route refuses a queued run, which stays Send-only).
+   */
+  subagentRunPausable?: boolean;
   /** Text-only composer without the session controls or outer spacing. */
   compact?: boolean;
   model?: { provider: string; modelId: string } | null;
@@ -564,7 +567,7 @@ export function ModelScopeWarningBanner({ warnings }: { warnings?: string[] }) {
 }
 
 export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
-  onSend, onAbort, onCancelEdit, onSteer, onFollowUp, isStreaming, subagentRunLive = false, model, isAutoModelSelection, modelNames, modelList, modelError, modelScopeWarnings, onModelChange, modelSwitching,
+  onSend, onAbort, onCancelEdit, onSteer, onFollowUp, isStreaming, subagentRunPausable = false, model, isAutoModelSelection, modelNames, modelList, modelError, modelScopeWarnings, onModelChange, modelSwitching,
   defaultModel, onSetDefaultModel,
   onCompact, onAbortCompaction, isCompacting, compactError, compactResult, toolPreset, onToolPresetChange,
   thinkingLevel, isAutoThinkingSelection = false, onThinkingLevelChange, availableThinkingLevels, thinkingLevelMap,
@@ -1410,7 +1413,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
       // Esc stops the agent when no slash/@/history menu or IME composition is active.
       // A live subagent run has no streaming session of its own, so it takes the
       // same shortcut: Stop pauses the run.
-      if (e.key === "Escape" && !isComposing && (isStreaming || subagentRunLive) && onAbort) {
+      if (e.key === "Escape" && !isComposing && (isStreaming || subagentRunPausable) && onAbort) {
         e.preventDefault();
         onAbort();
         return;
@@ -1425,7 +1428,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
         }
       }
     },
-    [isMobile, enterSendMode, isStreaming, subagentRunLive, onSteer, onFollowUp, onAbort, slashMenuOpen, slashQuery, displayedSlashCommands, slashActiveIndex, applySlashCommand, sendQueued, handleSend, getNextSlashIndex, atMenuOpen, atQuery, atMatches, atActiveIndex, applyAtCompletion, historyMenuOpen, inputHistory, historyActiveIndex, applyHistoryInput, value]
+    [isMobile, enterSendMode, isStreaming, subagentRunPausable, onSteer, onFollowUp, onAbort, slashMenuOpen, slashQuery, displayedSlashCommands, slashActiveIndex, applySlashCommand, sendQueued, handleSend, getNextSlashIndex, atMenuOpen, atQuery, atMatches, atActiveIndex, applyAtCompletion, historyMenuOpen, inputHistory, historyActiveIndex, applyHistoryInput, value]
   );
 
   const handleInput = useCallback(() => {
@@ -2677,7 +2680,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
               </div>
             )}
 
-            {(isStreaming || subagentRunLive) && (
+            {(isStreaming || subagentRunPausable) && (
               <button
                 onClick={onAbort}
                  title={t("chat.stopAgent")}

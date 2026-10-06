@@ -62,20 +62,24 @@ test("a child chat's Send steers the run, and Stop pauses it", () => {
     hookSource.indexOf("const handleAbort = useCallback"),
     hookSource.indexOf("const handleFork = useCallback"),
   );
-  assert.match(abortSource, /if \(controlledRunId && piSubagentRunLive\(observedRunState\)\)[\s\S]*?sendRunControl\("pause"\)/);
+  assert.match(abortSource, /if \(controlledRunId && piSubagentRunPausable\(observedRunState\)\)[\s\S]*?sendRunControl\("pause"\)/);
   // The main-agent abort arms remain reachable for every other session.
   assert.match(abortSource, /sendAgentCommand\(sid, \{ type: "abort" \}\)/);
 });
 
-test("the composer shows Stop for a live run and keeps Esc mirroring it", () => {
-  // ChatWindow drives the affordance from the hook's own live-run flag, not from
+test("the composer shows Stop only while the run can be paused, and Esc mirrors it", () => {
+  // ChatWindow drives the affordance from the hook's own pausable flag, not from
   // the streaming session: a child wrapper is idle while its run works.
-  assert.match(chatWindowSource, /stopAffordance = sessionBusy \|\| subagentRunLive/);
+  assert.match(chatWindowSource, /stopAffordance = sessionBusy \|\| subagentRunPausable/);
   assert.match(chatWindowSource, /registerAbortHandler\(stopAffordance \? handleAbort : null\)/);
-  assert.match(chatWindowSource, /subagentRunLive=\{subagentRunLive\}/);
-  assert.match(chatInputSource, /subagentRunLive = false/);
-  assert.match(chatInputSource, /\{\(isStreaming \|\| subagentRunLive\) && \(/);
-  assert.match(chatInputSource, /e\.key === "Escape" && !isComposing && \(isStreaming \|\| subagentRunLive\) && onAbort/);
+  assert.match(chatWindowSource, /subagentRunPausable=\{subagentRunPausable\}/);
+  assert.match(chatInputSource, /subagentRunPausable = false/);
+  assert.match(chatInputSource, /\{\(isStreaming \|\| subagentRunPausable\) && \(/);
+  assert.match(chatInputSource, /e\.key === "Escape" && !isComposing && \(isStreaming \|\| subagentRunPausable\) && onAbort/);
+  // Stop is fed by the pause guard, not the live state: a queued run has no runner
+  // to interrupt, so it stays Send-only.
+  assert.match(hookSource, /piSubagentRunPausable\(observedRunState\)/);
+  assert.match(hookSource, /subagentRunPausable: Boolean\(controlledRunId\) && piSubagentRunPausable\(observedRunState\)/);
 });
 
 test("a control response refetches the list the gate is seeded from", async () => {

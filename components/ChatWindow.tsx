@@ -314,7 +314,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
     handleBuiltinSlashCommand,
     handleToolPresetChange, handleThinkingLevelChange, handleSetDefaultModel, handleSetDefaultThinkingLevel, loadSlashCommands, scrollUserMsgToTop,
     loadContext, activeLeafId, scrollToBottom, scrollToMessage,
-    subagentRunLive,
+    subagentRunPausable,
   } = useAgentSession({
     session, sessionRunning, newSessionCwd, newSessionDraftKey, initialNewSessionChoices, onNewSessionChoicesChange, onAgentEnd: wrappedOnAgentEnd, onAttentionNeeded, onSessionCreated, onSessionForked,
     modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSystemToolsChange, onSystemInfoLoaderChange, onSessionStatsPanelOpen,
@@ -324,9 +324,11 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
     translate: t,
   });
   const sessionBusy = agentRunning || bashRunning;
-  // A child chat backed by a live run keeps Stop meaningful without a streaming
-  // session, so the affordance and the Esc shortcut cover both cases.
-  const stopAffordance = sessionBusy || subagentRunLive;
+  // A child chat backed by a running run keeps Stop meaningful without a streaming
+  // session, so the affordance and the Esc shortcut cover both cases. Stop is
+  // offered only while the run is `running`: the route's pause guard refuses a
+  // queued run, which stays Send-only.
+  const stopAffordance = sessionBusy || subagentRunPausable;
   const [quotedSelection, setQuotedSelection] = useState<{
     text: string;
     top: number;
@@ -1008,7 +1010,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
       onFollowUp={agentRunning ? handleFollowUp : undefined}
       onPromptWithStreamingBehavior={agentRunning ? handlePromptWithStreamingBehavior : undefined}
       isStreaming={sessionBusy}
-      subagentRunLive={subagentRunLive}
+      subagentRunPausable={subagentRunPausable}
       model={displayModelValue}
       isAutoModelSelection={isAutoModelSelection}
       modelNames={modelNames}

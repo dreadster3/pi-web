@@ -4,9 +4,18 @@
 // the demo mirrors this file.
 import type { PiSubagentRunState } from "./pi-subagents-snapshot";
 
-/** The run states whose progress still changes, i.e. where Stop means something. */
+/** The run states whose progress still changes, i.e. where Send means something. */
 export function piSubagentRunLive(state: PiSubagentRunState | undefined): boolean {
   return state === "queued" || state === "running";
+}
+
+/**
+ * Whether Stop can pause the run. The route's own pause guard is
+ * `state === "running"` (a queued run has no runner to interrupt yet), so Stop is
+ * offered only there; a queued run stays Send-only.
+ */
+export function piSubagentRunPausable(state: PiSubagentRunState | undefined): boolean {
+  return state === "running";
 }
 
 /**
