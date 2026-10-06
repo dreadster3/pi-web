@@ -1,6 +1,7 @@
 import type { SessionInfo, SubagentSessionStatus } from "./types";
 import {
   mapPiSubagentRunState,
+  type PiSubagentRunState,
   type PiSubagentSnapshotActivity,
   type PiSubagentSnapshotNode,
 } from "./pi-subagents-snapshot";
@@ -8,7 +9,9 @@ import {
 /** One run's live activity, reduced to the fields the Agents panel renders. */
 export interface RunProgress {
   label: string;
+  /** Panel vocabulary; `state` keeps the runner's own spelling for the controls. */
   status: SubagentSessionStatus;
+  state: PiSubagentRunState;
   startedAt?: number;
   endedAt?: number;
   activity?: PiSubagentSnapshotActivity;
@@ -18,6 +21,7 @@ function progressOf(node: PiSubagentSnapshotNode): RunProgress {
   return {
     label: node.label,
     status: mapPiSubagentRunState(node.state),
+    state: node.state,
     ...(node.startedAt !== undefined ? { startedAt: node.startedAt } : {}),
     ...(node.endedAt !== undefined ? { endedAt: node.endedAt } : {}),
     ...(node.activity ? { activity: node.activity } : {}),

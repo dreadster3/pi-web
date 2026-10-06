@@ -88,6 +88,7 @@ app/api/
   subagents/tools/route.ts         GET selectable child tools (builtin + extension)
   subagents/overrides/route.ts     PUT user-scope agentOverrides disable switch
   subagents/eject/route.ts         POST copy a catalog agent into a writable agent dir
+  subagents/runs/route.ts          POST pause | steer one pi-subagents async run (+ route.test.mjs)
   web-auth/route.ts                GET status | POST login | DELETE logout (browser password)
   provider-usage/query/route.ts    POST provider usage quotas
   push/config/route.ts             GET VAPID public key
@@ -123,6 +124,8 @@ lib/
   enabled-models-runtime.ts SDK adapter for enabledModels: pattern resolution, provider kinds, settings IO
   subagents.ts              legacy subagent session readers + shared agent-profile editor
   subagent-overrides.ts     setSubagentOverrideDisabled — user settings agentOverrides writer; plus lib/subagent-profile-precedence.ts and lib/pi-subagents-*.ts
+  pi-subagents-runs.ts      async run status.json parsing (run id, pid, pid namespace scope, steering receipts)
+  pi-subagents-control.ts   pause/steer one async run: control inbox (or signal fallback), observed, never assumed
   file-access.ts            allowed file roots for /api/files and worktrees
   file-upload-client.ts     browser upload to /api/files ?type=upload, shared by the explorer and chat drops
   linked-directory.ts       directory links leading outside the allowed roots + the allow-link check
@@ -226,7 +229,7 @@ Design decisions and traps live in `docs/agents/`, one note per area. Read every
 - [models.md](docs/agents/models.md): default model and reasoning level, providers registered at session_start, mid-run reasoning changes, remote provider catalogs, `enabledModels` scoping and minimal edits, provider auth listing and credentials. Files: `app/api/models/**`, `app/api/models-config/**`, `app/api/auth/**`, `lib/default-preferences.ts`, `lib/model-scope.ts`, `lib/enabled-models*.ts`, `lib/model-catalog-refresh.ts`, `lib/deferred-provider-models.ts`, `lib/provider-listing*.ts`, `components/ModelsConfig.tsx`, `components/EnabledModelsSection.tsx`, `components/ModelSelector.tsx`, `components/SelectorRow.tsx`.
 - [files-and-access.md](docs/agents/files-and-access.md): worktrees and project grouping, the file access allow-list (the `/api/files` security boundary), file tree visibility, uploads and chat file drops, web password throttling. Files: `app/api/files/**`, `app/api/cwd/**`, `app/api/worktrees/**`, `app/api/file-index/**`, `app/api/web-auth/**`, `proxy.ts`, `lib/path-security.ts`, `lib/file-access.ts`, `lib/linked-directory.ts`, `lib/session-file-references*.ts`, `lib/file-tree-visibility.ts`, `lib/file-upload-client.ts`, `lib/worktree.ts`, `lib/paths.ts`, `lib/auth-throttle.ts`, `components/ProjectWorktreePicker.tsx`, `components/NewSessionContextBar.tsx`, `components/FileExplorer.tsx`, `hooks/useDragDrop.ts`.
 - [settings-ui.md](docs/agents/settings-ui.md): Plugins and Skills routes, sidebar group switches, the shared `SettingsUi` blocks every settings panel and add pane uses. Files: `app/api/plugins/**`, `app/api/skills/**`, `components/SettingsUi.tsx`, `components/settings-ui-helpers.ts`, `components/SkillsConfig.tsx`, `components/PluginsConfig.tsx`; also before adding a settings section or add pane.
-- [subagents.md](docs/agents/subagents.md): delegation owned by the `pi-subagents` package, the legacy built-in-engine sessions that still render, and the shared agent-profile editor. Files: `lib/subagents.ts`, `lib/subagent-overrides.ts`, `lib/subagent-profile-precedence.ts`, `lib/pi-subagents-*.ts`, `app/api/subagents/**`, `components/AgentsConfig.tsx`, `components/AgentSessionPanel.tsx`, `hooks/useAgentsRefresh.ts`.
+- [subagents.md](docs/agents/subagents.md): delegation owned by the `pi-subagents` package, the legacy built-in-engine sessions that still render, the shared agent-profile editor, and pause/steer bridging to a detached async run. Files: `lib/subagents.ts`, `lib/subagent-overrides.ts`, `lib/subagent-profile-precedence.ts`, `lib/pi-subagents-*.ts`, `app/api/subagents/**`, `components/AgentsConfig.tsx`, `components/AgentSessionPanel.tsx`, `components/pi-subagent-run-controls.ts`, `hooks/useAgentsRefresh.ts`.
 - [client-platform.md](docs/agents/client-platform.md): mobile software keyboard and viewport height, completion sound. Files: `hooks/useViewportHeight.ts`, `hooks/useAudio.ts`, the keyboard-open CSS.
 
 ---
