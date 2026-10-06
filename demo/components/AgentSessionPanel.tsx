@@ -1,16 +1,10 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useI18n } from "@/hooks/useI18n";
 import type { SessionInfo, SubagentSessionStatus } from "@/lib/types";
-import type { PiSubagentRunState, PiSubagentSnapshotNode } from "@/lib/pi-subagents-snapshot";
+import type { PiSubagentSnapshotNode } from "@/lib/pi-subagents-snapshot";
 import { buildRunProgress, formatRunProgress, type RunProgress } from "@/lib/pi-subagents-progress";
-import {
-  piSubagentRunControlDisabledKey,
-  piSubagentRunControlNotice,
-  piSubagentRunControls,
-  sendPiSubagentRunControl,
-} from "./pi-subagent-run-controls";
 
 interface Props {
   rootSession: SessionInfo;
@@ -20,8 +14,6 @@ interface Props {
   /** Live runs from the pi-subagents `subagent-async` widget, when present. */
   liveRuns?: PiSubagentSnapshotNode[];
   onSelectSession: (session: SessionInfo) => void;
-  /** Refetch the sessions list after a pause/steer flipped a run's state. */
-  onRunControl?: () => void;
 }
 
 function sessionTitle(session: SessionInfo): string {
@@ -116,127 +108,6 @@ function CompletedToggle({ checked, onChange, label }: { checked: boolean; onCha
   );
 }
 
-/** One run's pause/steer controls, from data the panel already has. */
-function RunControls({ runId, state, onRunControl }: {
-  runId: string;
-  state: PiSubagentRunState | undefined;
-  onRunControl?: () => void;
-}) {
-  const { t } = useI18n();
-  const [steerOpen, setSteerOpen] = useState(false);
-  const [message, setMessage] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [notice, setNotice] = useState<{ text: string; error: boolean } | null>(null);
-  const controls = piSubagentRunControls(state);
-  const disabledReasonKey = piSubagentRunControlDisabledKey(state);
-
-  const run = useCallback(async (action: "pause" | "steer") => {
-    setBusy(true);
-    setNotice(null);
-    try {
-      const response = await sendPiSubagentRunControl(runId, action, action === "steer" ? message : undefined);
-      if (!response.ok) {
-        setNotice({ text: response.failure.error, error: true });
-        return;
-      }
-      setNotice({ text: piSubagentRunControlNotice(response.data, t), error: false });
-      if (action === "steer") {
-        setMessage("");
-        setSteerOpen(false);
-      }
-      onRunControl?.();
-    } catch (cause) {
-      setNotice({ text: cause instanceof Error ? cause.message : String(cause), error: true });
-    } finally {
-      setBusy(false);
-    }
-  }, [message, onRunControl, runId, t]);
-
-  return (
-    <span
-      onClick={(event) => event.stopPropagation()}
-      style={{ display: "grid", gap: 4, padding: "0 12px 7px 49px" }}
-    >
-      <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-        <button
-          type="button"
-          disabled={!controls.pause || busy}
-          title={controls.pause ? t("agentSwitcher.run.pause") : t(disabledReasonKey ?? "agentSwitcher.run.unsupported")}
-          aria-label={t("agentSwitcher.run.pause")}
-          onClick={() => void run("pause")}
-          style={controlButtonStyle(controls.pause && !busy)}
-        >
-          {t("agentSwitcher.run.pause")}
-        </button>
-        {controls.steer && !steerOpen && (
-          <button
-            type="button"
-            disabled={busy}
-            title={t("agentSwitcher.run.steer")}
-            aria-label={t("agentSwitcher.run.steer")}
-            onClick={() => setSteerOpen(true)}
-            style={controlButtonStyle(!busy)}
-          >
-            {t("agentSwitcher.run.steer")}
-          </button>
-        )}
-        {!controls.steer && (
-          <button type="button" disabled title={t(disabledReasonKey ?? "agentSwitcher.run.unsupported")} style={controlButtonStyle(false)}>
-            {t("agentSwitcher.run.steer")}
-          </button>
-        )}
-      </span>
-      {steerOpen && controls.steer && (
-        <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          <input
-            type="text"
-            value={message}
-            autoFocus
-            placeholder={t("agentSwitcher.run.steerPlaceholder")}
-            aria-label={t("agentSwitcher.run.steerPlaceholder")}
-            onChange={(event) => setMessage(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" && message.trim()) void run("steer");
-              if (event.key === "Escape") { setSteerOpen(false); setMessage(""); }
-            }}
-            style={{
-              flex: 1, minWidth: 0, height: 26, padding: "0 8px",
-              border: "1px solid var(--border)", borderRadius: 5,
-              background: "var(--bg)", color: "var(--text)", fontSize: 11, outline: "none",
-            }}
-          />
-          <button
-            type="button"
-            disabled={busy || !message.trim()}
-            aria-label={t("agentSwitcher.run.sendSteer")}
-            onClick={() => void run("steer")}
-            style={controlButtonStyle(!busy && Boolean(message.trim()))}
-          >
-            {t("agentSwitcher.run.sendSteer")}
-          </button>
-          <button type="button" disabled={busy} onClick={() => { setSteerOpen(false); setMessage(""); }} style={controlButtonStyle(!busy)}>
-            {t("chat.cancel")}
-          </button>
-        </span>
-      )}
-      {notice && (
-        <span style={{ color: notice.error ? "#dc2626" : "var(--text-dim)", fontSize: 10, whiteSpace: "normal" }} role={notice.error ? "alert" : undefined}>
-          {notice.text}
-        </span>
-      )}
-    </span>
-  );
-}
-
-function controlButtonStyle(enabled: boolean): React.CSSProperties {
-  return {
-    height: 22, padding: "0 8px", flexShrink: 0,
-    border: "1px solid var(--border)", borderRadius: 5,
-    background: "var(--bg)", color: enabled ? "var(--text)" : "var(--text-dim)",
-    fontSize: 11, cursor: enabled ? "pointer" : "not-allowed", whiteSpace: "nowrap",
-  };
-}
-
 function AgentRow({
   session,
   main,
@@ -245,7 +116,6 @@ function AgentRow({
   status,
   progress,
   onSelect,
-  onRunControl,
 }: {
   session: SessionInfo;
   main?: boolean;
@@ -254,7 +124,6 @@ function AgentRow({
   status: SubagentSessionStatus;
   progress?: RunProgress;
   onSelect: () => void;
-  onRunControl?: () => void;
 }) {
   const { locale, t } = useI18n();
   const relation = session.relation?.kind === "subagent" ? session.relation : null;
@@ -264,28 +133,28 @@ function AgentRow({
     : `${relation?.profile ?? t("agentSwitcher.subagent")} · ${formatRelativeTime(session.modified, locale)}`;
   const progressText = !main && progress ? formatRunProgress(progress, t) : "";
   const secondary = progressText ? `${progressText} · ${baseSecondary}` : baseSecondary;
-  const runId = relation?.runId;
 
-  // The run body is a click target, not a button: the row also holds controls,
-  // and a button may not contain one.
   return (
-    <div
+    <button
+      type="button"
       role="option"
       aria-selected={selected}
-      tabIndex={0}
       onClick={onSelect}
-      onKeyDown={(event) => {
-        if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault();
-          onSelect();
-        }
-      }}
       style={{
+        width: "100%",
+        minHeight: 56,
+        display: "grid",
+        gridTemplateColumns: "28px minmax(0, 1fr) auto",
+        alignItems: "center",
+        gap: 9,
+        padding: "7px 12px",
+        border: "none",
         borderBottom: "1px solid var(--border)",
         borderLeft: selected ? "2px solid var(--accent)" : "2px solid transparent",
         background: selected ? "var(--bg-selected)" : "transparent",
         color: "var(--text)",
         cursor: "pointer",
+        textAlign: "left",
       }}
       onMouseEnter={(event) => {
         if (!selected) event.currentTarget.style.background = "var(--bg-hover)";
@@ -294,53 +163,40 @@ function AgentRow({
         if (!selected) event.currentTarget.style.background = "transparent";
       }}
     >
-      <span
-        style={{
-          minHeight: 56,
-          display: "grid",
-          gridTemplateColumns: "28px minmax(0, 1fr) auto",
-          alignItems: "center",
-          gap: 9,
-          padding: "7px 12px",
-          textAlign: "left",
-        }}
-      >
-        <span style={{ width: 28, height: 28, display: "grid", placeItems: "center", color: main ? "var(--text-muted)" : "var(--accent)" }}>
-          {main ? (
-            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0 1 16 0" />
-            </svg>
-          ) : (
-            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <rect x="5" y="7" width="14" height="11" rx="2" /><path d="M9 11h.01M15 11h.01M9 15h6M12 7V4M10 4h4" />
-            </svg>
-          )}
+      <span style={{ width: 28, height: 28, display: "grid", placeItems: "center", color: main ? "var(--text-muted)" : "var(--accent)" }}>
+        {main ? (
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0 1 16 0" />
+          </svg>
+        ) : (
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <rect x="5" y="7" width="14" height="11" rx="2" /><path d="M9 11h.01M15 11h.01M9 15h6M12 7V4M10 4h4" />
+          </svg>
+        )}
+      </span>
+      <span style={{ minWidth: 0 }}>
+        <span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12, fontWeight: selected ? 600 : 500 }} title={primary}>
+          {primary}
         </span>
-        <span style={{ minWidth: 0 }}>
-          <span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12, fontWeight: selected ? 600 : 500 }} title={primary}>
-            {primary}
-          </span>
-          <span style={{ display: "block", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--text-dim)", fontSize: 11 }} title={secondary}>
-            {secondary}
-          </span>
-        </span>
-        <span style={{ display: "flex", alignItems: "center", gap: 6, color: main && !running ? "var(--text-dim)" : statusColor(status), fontSize: 11, whiteSpace: "nowrap" }}>
-          {main && !running ? (
-            selected ? t("agentSwitcher.current") : null
-          ) : (
-            <>
-              <StatusIcon status={status} />
-              <span>{t(`agentSwitcher.status.${status}`)}</span>
-            </>
-          )}
+        <span style={{ display: "block", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--text-dim)", fontSize: 11 }} title={secondary}>
+          {secondary}
         </span>
       </span>
-      {runId && !main && <RunControls runId={runId} state={progress?.state} onRunControl={onRunControl} />}
-    </div>
+      <span style={{ display: "flex", alignItems: "center", gap: 6, color: main && !running ? "var(--text-dim)" : statusColor(status), fontSize: 11, whiteSpace: "nowrap" }}>
+        {main && !running ? (
+          selected ? t("agentSwitcher.current") : null
+        ) : (
+          <>
+            <StatusIcon status={status} />
+            <span>{t(`agentSwitcher.status.${status}`)}</span>
+          </>
+        )}
+      </span>
+    </button>
   );
 }
 
-export function AgentSessionPanel({ rootSession, subagents, selectedSessionId, runningSessionIds, liveRuns = [], onSelectSession, onRunControl }: Props) {
+export function AgentSessionPanel({ rootSession, subagents, selectedSessionId, runningSessionIds, liveRuns = [], onSelectSession }: Props) {
   const { t } = useI18n();
   const [query, setQuery] = useState("");
   const [showCompleted, setShowCompleted] = useState(false);
@@ -459,7 +315,6 @@ export function AgentSessionPanel({ rootSession, subagents, selectedSessionId, r
               status={statusOf(session)}
               progress={runProgress.get(session.id)}
               onSelect={() => onSelectSession(session)}
-              onRunControl={onRunControl}
             />
           ))}
           {visibleSubagents.length === 0 && (

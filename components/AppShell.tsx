@@ -225,11 +225,6 @@ export function AppShell() {
       terminalSubagentRunIdsRef.current,
     )) setRefreshKey((k) => k + 1);
   }, [subagentRuns]);
-  // A pause/steer changes a run's own `status.json`, which is what the panel
-  // badges; re-read the list the family is built from, like the live widget does.
-  const handleSubagentRunControl = useCallback(() => {
-    setRefreshKey((k) => k + 1);
-  }, []);
   const [sessionKey, setSessionKey] = useState(0);
   const sessionScrollPositionsRef = useRef(new Map<string, ChatScrollPosition>());
   const handleSessionScrollPositionChange = useCallback((sessionId: string, position: ChatScrollPosition) => {
@@ -2266,7 +2261,6 @@ export function AppShell() {
                   runningSessionIds={runningSessionIds}
                   liveRuns={subagentRuns}
                   onSelectSession={handleSelectSession}
-                  onRunControl={handleSubagentRunControl}
                 />
               )}
               {activeTopPanel === "system" && (
