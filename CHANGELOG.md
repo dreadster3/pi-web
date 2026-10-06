@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.2.0](https://github.com/dreadster3/pi-web/compare/v0.1.0...v0.2.0) (2026-10-06)
+
+
+### Features
+
+* **projects:** delete a project's sessions ([#27](https://github.com/dreadster3/pi-web/issues/27)) ([0c03988](https://github.com/dreadster3/pi-web/commit/0c03988a1859c5d45bbc2101887852940f7ccb14))
+
+
+### Bug Fixes
+
+* **deps:** repair incomplete bundled-dep entries in demo/package-lock.json ([#65](https://github.com/dreadster3/pi-web/issues/65)) ([cfbe6b9](https://github.com/dreadster3/pi-web/commit/cfbe6b96ca304a732e1af025f9757c2d8a1b3be2))
+
 ## [0.1.0](https://github.com/dreadster3/pi-web/compare/v0.0.4...v0.1.0) (2026-10-03)
 
 
