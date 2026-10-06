@@ -323,7 +323,6 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     modelsRefreshKey, onBranchDataChange, onSystemPromptChange, onSystemToolsChange, onSystemInfoLoaderChange, onSessionStatsPanelOpen,
     onSubagentRunControl, translate,
   } = opts;
-  void opts.translate;
 
   const isNew = session === null && newSessionCwd !== null;
 
