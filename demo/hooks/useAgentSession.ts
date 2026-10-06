@@ -539,13 +539,15 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   // sidebar's `relation.status` seeds the first paint until the first answer lands.
   const controlledRunId = session?.relation?.kind === "subagent" ? session.relation.runId : undefined;
   const controlledStepIndex = session?.relation?.kind === "subagent" ? session.relation.stepIndex : undefined;
-  const [runState, setRunState] = useState<{ runId: string; state: PiSubagentRunState } | null>(null);
+  const [runState, setRunState] = useState<{ runId: string; state: PiSubagentRunState | null } | null>(null);
   // The sidebar row's own status, until a poll answers for this run.
   const seededRunState = session?.relation?.kind === "subagent"
     ? (session.relation.status === "running" ? "running" as const : undefined)
     : undefined;
+  // A `state: null` record is a run the poll found gone or unaddressable: it wins
+  // over the seed so the gate clears instead of falling back to a stale "running".
   const observedRunState: PiSubagentRunState | undefined = runState && runState.runId === controlledRunId
-    ? runState.state
+    ? (runState.state ?? undefined)
     : seededRunState;
 
   useEffect(() => {
@@ -568,9 +570,16 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       try {
         const result = await fetchPiSubagentRunStatus(controlledRunId, current.signal);
         if (stopped || controller !== current) return;
-        // A run gone or unreadable stops the poll: the composer falls back to the
-        // normal prompt, which is the right thing for a finished transcript.
-        if (result.ok) setRunState({ runId: controlledRunId, state: result.data.state });
+        if (result.ok) {
+          setRunState({ runId: controlledRunId, state: result.data.state });
+        } else if (result.status === 404 || result.status === 400) {
+          // A run that is gone or unaddressable will not come back at the same
+          // id, so stop the poll and clear the gate: the composer falls back to a
+          // plain prompt against the finished transcript.
+          setRunState({ runId: controlledRunId, state: null });
+          stopped = true;
+        }
+        // A 5xx is transient: keep the last known state and retry on the next poll.
       } catch {
         // Keep the last known state; the next visible-tab poll retries.
       } finally {

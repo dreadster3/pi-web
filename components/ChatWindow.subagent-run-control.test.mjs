@@ -24,6 +24,13 @@ test("the child chat polls the run's own status and seeds from the sidebar row",
   assert.match(controlSource, /session\.relation\.status === "running"/);
   // A failed read keeps the last known state instead of clearing the gate.
   assert.doesNotMatch(controlSource, /catch[\s\S]{0,80}setRunState\(null\)/);
+  // A definitive refusal (404/400) stops the poll and clears the gate, so the
+  // composer falls back to a plain prompt; a transient failure only retries.
+  assert.match(
+    controlSource,
+    /else if \(result\.status === 404 \|\| result\.status === 400\) \{[\s\S]*?setRunState\(\{ runId: controlledRunId, state: null \}\)[\s\S]*?stopped = true;/,
+  );
+  assert.match(controlSource, /runState\.state \?\? undefined/);
 });
 
 test("a child chat's Send steers the run, and Stop pauses it", () => {
