@@ -285,6 +285,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
     handleToolPresetChange, handleThinkingLevelChange, handleSetDefaultModel, handleSetDefaultThinkingLevel, loadSlashCommands, scrollUserMsgToTop,
     loadContext, activeLeafId, scrollToBottom, scrollToMessage,
     subagentRunPausable,
+    handleSubagentPause,
   } = useAgentSession({
     session, sessionRunning, newSessionCwd, newSessionDraftKey, onAgentEnd: wrappedOnAgentEnd, onAttentionNeeded, onSessionCreated, onSessionForked,
     modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSystemToolsChange, onSystemInfoLoaderChange, onSessionStatsPanelOpen,
@@ -293,10 +294,10 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
     translate: t,
   });
   const sessionBusy = agentRunning || bashRunning;
-  // A child chat backed by a running run keeps Stop meaningful without a streaming
-  // session, so the affordance and the Esc shortcut cover both cases. Stop is
-  // offered only while the run is `running`: the route's pause guard refuses a
-  // queued run, which stays Send-only.
+  // A child chat backed by a running run keeps Stop and Pause meaningful without a
+  // streaming session, so the affordances and the Esc shortcut cover both cases.
+  // Both state buttons are offered only while the run is `running`: the route's
+  // guards refuse a queued run, which stays Send-only.
   const stopAffordance = sessionBusy || subagentRunPausable;
   const [quotedSelection, setQuotedSelection] = useState<{
     text: string;
@@ -946,6 +947,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
       onPromptWithStreamingBehavior={agentRunning ? handlePromptWithStreamingBehavior : undefined}
       isStreaming={sessionBusy}
       subagentRunPausable={subagentRunPausable}
+      onSubagentPause={subagentRunPausable ? handleSubagentPause : undefined}
       model={displayModelValue}
       isAutoModelSelection={isAutoModelSelection}
       modelNames={modelNames}

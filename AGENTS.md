@@ -88,7 +88,7 @@ app/api/
   subagents/tools/route.ts         GET selectable child tools (builtin + extension)
   subagents/overrides/route.ts     PUT user-scope agentOverrides disable switch
   subagents/eject/route.ts         POST copy a catalog agent into a writable agent dir
-  subagents/runs/route.ts          GET one run's state | POST pause | steer one pi-subagents async run (+ route.test.mjs)
+  subagents/runs/route.ts          GET one run's state | POST pause | stop | steer one pi-subagents async run (+ route.test.mjs)
   web-auth/route.ts                GET status | POST login | DELETE logout (browser password)
   provider-usage/query/route.ts    POST provider usage quotas
   push/config/route.ts             GET VAPID public key
@@ -125,7 +125,7 @@ lib/
   subagents.ts              legacy subagent session readers + shared agent-profile editor
   subagent-overrides.ts     setSubagentOverrideDisabled — user settings agentOverrides writer; plus lib/subagent-profile-precedence.ts and lib/pi-subagents-*.ts
   pi-subagents-runs.ts      async run status.json parsing (run id, pid, pid namespace scope, steering receipts)
-  pi-subagents-control.ts   pause/steer one async run: control inbox (or signal fallback), observed, never assumed
+  pi-subagents-control.ts   pause/stop/steer one async run: control inbox (or signal fallback), observed, never assumed
   pi-subagents-run-control.ts client gate + control requests for the chat composer (+ test)
   file-access.ts            allowed file roots for /api/files and worktrees
   file-upload-client.ts     browser upload to /api/files ?type=upload, shared by the explorer and chat drops

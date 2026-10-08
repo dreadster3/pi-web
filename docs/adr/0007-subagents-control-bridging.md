@@ -21,8 +21,9 @@ Constraints that shape the options:
   `package.json` entry, nothing read from its source for logic. The only
   allowed coupling is the run artifacts on disk: status.json and events.jsonl
   are read-only, and writes are limited to the package's **designed control
-  inbox** (`control/interrupt.json`, `control/steer-requests/`) — the channel
-  the package itself has used for interrupt and steer delivery since 0.71,
+  inbox** (`control/interrupt.json`, `control/steer-requests/`,
+  `control/stop-requests/`) — the channel
+  the package itself has used for interrupt, steer and stop delivery since 0.71,
   guarded by validity checks and never a mutation of its state files.
 - **The run lives in a detached process that outlives its parent session.**
   The runner records `pid` and `pidNamespaceScope` in `status.json`; since
@@ -39,8 +40,16 @@ Constraints that shape the options:
 
 ## Decision
 
-**Pi Web bridges two actions to a pi-subagents async run, both offered under
-`POST /api/subagents/runs`: `pause` (interrupt) and `steer` (follow-up).**
+**Pi Web bridges three actions to a pi-subagents async run, all offered under
+`POST /api/subagents/runs`: `pause` (interrupt, resumable), `stop` (hard stop)
+and `steer` (follow-up).**
+
+- **Stop ends the run; Pause parks it.** The owner's decision: the chat
+  composer's Stop must not leave a resumable pause behind, because the parent
+  orchestrator would see a "paused, waiting" notice from what the user pressed
+  Stop on. Stop therefore uses the package's own stop channel — the third arm
+  of the same control inbox — and the run reaches `stopped`, which no send can
+  revive. Pause keeps the interrupt lane and stays resumable.
 
 - **Pause prefers the control inbox; the signal is a fallback.** When the
   run directory has a `control/` inbox (package ≥ 0.71, the live 0.76
@@ -52,11 +61,25 @@ Constraints that shape the options:
   cross-uid and hardened hosts raise `EPERM`, Windows cannot deliver it, and
   a package minor may retire the handler — each a distinct reported error,
   never a silent no-op.
-- **A delivery attempt is not an outcome.** The runner's handler is guarded
+- **A delivery attempt is not an outcome.** The runner's handlers are guarded
   by `state === "running"`, so a run that finished between the read and the
   delivery ignores the request, and `status.json` goes through a 100 ms
   coalescer, so a real flip can lag. The route re-reads `status.json` briefly
   and returns the **observed** state, including "delivered, still running".
+- **Stop prefers the stop channel; a legacy layout only pauses.** Where the run
+  directory has a `control/` inbox, Stop checks
+  `control/stop-inbox-closed.json` first (present → `409 stop_rejected /
+  inbox_closed`, the package's own refusal), writes
+  `control/stop-requests/<13-digit-padded-ts>-<uuid>.json` as
+  `{ "type": "stop", "ts": <ms>, "source": "pi-web" }` (the package's
+  `requestAsyncStop` shape, and its file-name contract), then re-checks the
+  marker and deletes the request if the runner closed its inbox meanwhile — the
+  package takes such a late request back, so a later revival cannot consume a
+  stale stop. A package ≥ 0.76 runner consumes it and ends the run `stopped`.
+  A **legacy** (pre-0.71) artifact has no stop channel: its only handler is the
+  interrupt, so that arm signals and then reports the `paused` state it actually
+  observed (`state: "paused"`, `mechanism: "signal"`) rather than claiming a
+  stop that did not happen. The UI notice names that honestly.
 - **Steering is state-dependent (owner decision: direct inbox write where
   possible).**
   - *Running run:* write a steer request into the run's inbox,
@@ -85,7 +108,8 @@ Constraints that shape the options:
     costs a parent turn; the response labels it model-mediated.
 - **Foreground runs are unsupported in v1.** No detached pid, no handle, no
   control inbox target. The route answers with a structured unsupported error
-  and the UI disables the control with a reason, rather than failing silently.
+  and the UI offers no state buttons (the gate stays closed), rather than
+  failing silently.
 - **`pi-subagents` stays optional and is not a dependency.** Nothing here is
   installed, versioned, or imported; absence and emptiness are ordinary states.
   When no run root exists, or the requested run has no `status.json`, the route
@@ -101,11 +125,16 @@ re-reads `status.json` per request (no caching, like the other run readers).
 
 ```jsonc
 // request
-{ "runId": "<runId>", "action": "pause" | "steer", "message": "<steer only>",
+{ "runId": "<runId>", "action": "pause" | "stop" | "steer",
+  "message": "<steer only>",
   "targetIndex": "<steer only, one child of a chain>" }
 
 // 200, pause
 { "ok": true, "action": "pause", "runId": "…", "state": "paused",
+  "transitioned": true, "mechanism": "control-inbox" | "signal" }
+
+// 200, stop (hard stop; `state` is what the poll observed)
+{ "ok": true, "action": "stop", "runId": "…", "state": "stopped",
   "transitioned": true, "mechanism": "control-inbox" | "signal" }
 
 // 200, steer (running run, inbox write)
@@ -141,7 +170,11 @@ root; anything else is a `400` that never touches the filesystem.
 
 `pause` returns the state observed after the poll, with `transitioned: false`
 when the run was still `running` at the end: a delivered request that did not
-land is a `200` with an honest state, not an error. `steer` against a running
+land is a `200` with an honest state, not an error. `stop` reports the same way,
+and its `state` is **never** assumed: the inbox arm normally observes
+`stopped`, while the legacy signal arm observes `paused` and reports it as
+such — a legacy fallback pauses, and the UI says so rather than naming a stop
+that did not happen. `steer` against a running
 run aggregates the observed steering lifecycle into `steeringState`
 (`delivered` also covers the package's `recovered`/`late` receipts; `failed`
 means at least one targeted child refused delivery; `queued` means accepted
@@ -157,9 +190,11 @@ parent, not that the model has acted on it.
 | 404 | `run_not_found` | `no_run_roots` (no run root, or the env override absent); `no_status` (run dir or `status.json` missing) |
 | 409 | `run_unsupported` | `no_pid` (foreground run, or a package version that omits `pid`/inbox — both arms need one of them) |
 | 409 | `run_not_pausable` | `not_running`; `pid_unverifiable` (signal fallback with recorded vs current `pidNamespaceScope` disagree) |
+| 409 | `stop_rejected` | `inbox_closed` (`stop-inbox-closed.json` present, before the write or right after it); `not_running` (the stop guard is the same `state === "running"`); `no_pid` (legacy layout with no usable pid) |
 | 409 | `steer_rejected` | `inbox_closed` (`steer-inbox-closed.json` present); `no_running_steps` (running run with no steerable child); `target_out_of_range` (`targetIndex` ≥ `run.steps.length`); `target_not_steerable` (the named child is not `running`/`queued`) |
 | 409 | `parent_session_not_live` | `no_live_wrapper` (paused-run steer; parent on disk, not alive in this server) |
 | 502 | `interrupt_failed` | `write_failed` (inbox write, e.g. EACCES/ENOSPC); `eperm`; `esrch` (pid gone, signal fallback); `enosys` (platform cannot deliver signals) |
+| 502 | `stop_failed` | `write_failed` (stop request write); `eperm`; `esrch`; `enosys` (legacy signal arm) |
 | 502 | `steer_failed` | `write_failed` (inbox write); `send_failed` (live parent refused the prompt — busy turn, lost admission race, session copy in flight) |
 | 500 | `internal_error` | `unexpected` (boundary catch; anything the control module does not map itself) |
 
@@ -169,6 +204,15 @@ root; for the signal fallback, `pid` a numeric integer `> 1` and, when both
 the recorded and the current `pidNamespaceScope` are present, no mismatch.
 Then deliver and re-read `status.json` every ~200 ms for ~2 s, stopping early
 on a state other than `running`; a timeout is the observed `running` state.
+
+**Stop guard and poll.** The same guard and the same poll, with the stop inbox
+instead of the interrupt one: `stop-inbox-closed.json` is checked **before**
+the write (a `409 stop_rejected / inbox_closed`) and again right after it, in
+which case the just-written request is removed — the package's own
+`requestAsyncStop` does the same, so a stop that arrived as the runner closed
+its inbox cannot be consumed by a later revival. On the legacy arm `no_pid`
+and `pid_unverifiable` are `stop_rejected` rather than `run_not_pausable`, so
+the UI reads one error code per action.
 
 **Steer acceptance.** The steer request must pass the package's own validity
 rules before the file is written; an invalid request is a `400`, not a file
@@ -196,17 +240,27 @@ the runner will silently discard.
   have no pause path.** The first offers no detached handle; the second
   predates the inbox; on Windows signals cannot be delivered. Each answers
   with an actionable unsupported error, never a silent no-op.
+- **A UI Stop hard-stops; a UI Pause keeps the resumable loop.** Stop ends the
+  run through the package's stop channel, so the parent orchestrator never sees
+  a resumable "paused, waiting" notice from a Stop gesture. Pause is the
+  resumable gesture, and the composer's next send turns it into a
+  parent-mediated resume. On a pre-0.71 artifact the two collapse into the one
+  interrupt path, which pauses: the response carries the observed `paused`
+  state and the notice says the run paused because it has no stop channel,
+  rather than claiming a stop.
 - **The UI derives state from data it already has.** The chat composer is the
-  control surface: Send steers the run behind the open child transcript and Stop
-  pauses it, the same gesture and affordance as a main-agent prompt and abort.
-  The gate reads the run's own `state` — `relation.status` seeds the first paint,
+  control surface: it shows one row, Steer then Stop and Pause, the same
+  gestures as a main-agent send and stop. Both state buttons read the run's own
+  `state` — `relation.status` seeds the first paint,
   `GET /api/subagents/runs?runId=` keeps it honest while the child chat is open —
-  and a terminal run clears it so the composer falls back to a plain prompt. A
+  and a terminal run clears them so the composer falls back to a plain prompt. A
   control response refetches through the existing conventions
-  (`onSubagentRunControl` → `refreshKey`).
+  (`onSubagentRunControl` → `refreshKey`), and a stop that observed a terminal
+  state closes the gate without waiting for the next poll.
 - **No extra control UI.** Steering is a normal message send inside the
-  subagent's chat, and Stop is the existing composer affordance: no per-run menu,
-  button or panel row is added, and the Agents panel stays a read-only view.
+  subagent's chat, and Stop/Pause are the existing composer affordances: no
+  per-run menu, button or panel row is added, and the Agents panel stays a
+  read-only view.
 - **What Pi Web reads stays a guess about someone else's format.** `pid`,
   `pidNamespaceScope`, `state`, and `steering` stay optional in a versioned
   artifact (`lifecycleArtifactVersion`); the parser tolerates their absence

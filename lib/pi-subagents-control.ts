@@ -1,11 +1,12 @@
-// Bridging pause (interrupt) and steer to a pi-subagents async run, per
+// Bridging pause (interrupt), stop and steer to a pi-subagents async run, per
 // docs/adr/0007-subagents-control-bridging.md. The package stays optional: this
 // module imports nothing from it, reads only `status.json`, and writes only the
 // package's own control inbox (`control/interrupt.json`,
-// `control/steer-requests/`) — never a state file. Delivery is never assumed:
-// both actions re-read `status.json` briefly and report what was observed.
+// `control/steer-requests/`, `control/stop-requests/`) — never a state file.
+// Delivery is never assumed: every action re-reads `status.json` briefly and
+// reports what was observed.
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readlinkSync } from "node:fs";
+import { existsSync, mkdirSync, readlinkSync, unlinkSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { writePrivateFileAtomicSync } from "./atomic-file";
 import {
@@ -93,6 +94,31 @@ function steerRequestFileName(request: { ts: number; id: string }): string {
   return `${String(request.ts).padStart(13, "0")}-${Buffer.from(request.id).toString("base64url")}.json`;
 }
 
+/** `control/stop-requests/<13-digit-padded-ts>-<uuid>.json`, the package's own name. */
+function stopRequestFileName(ts: number, id: string): string {
+  return `${String(ts).padStart(13, "0")}-${id}.json`;
+}
+
+/**
+ * The pid a legacy (pre-0.71) artifact can be signaled on, or the refusal to
+ * report instead. Pause and stop share it: that layout has one signal handler,
+ * so its `rejectCode` is the only thing that differs between them.
+ */
+function legacySignalPid(runId: string, run: PiSubagentRun, rejectCode: string): number | SubagentsControlResult {
+  const pid = run.pid;
+  if (pid === undefined || !Number.isInteger(pid) || pid <= 1) {
+    return fail(409, `Run ${runId} has no control inbox and no usable pid.`, "run_unsupported", "no_pid");
+  }
+  // Recorded vs current scope must agree when both are present: a mismatch is
+  // how a recycled pid is caught before it is signaled.
+  const recorded = run.pidNamespaceScope;
+  const current = subagentsControlDeps.pidNamespaceScope(pid);
+  if (recorded && current && recorded !== current) {
+    return fail(409, `Pid ${pid} of run ${runId} lives in another pid namespace.`, rejectCode, "pid_unverifiable");
+  }
+  return pid;
+}
+
 /** Re-read `status.json` until the run leaves `running` or the window closes. */
 async function pollUntilNotRunning(
   location: PiSubagentRunLocation,
@@ -130,17 +156,8 @@ async function pause(runId: string, location: PiSubagentRunLocation, run: PiSuba
     mechanism = "control-inbox";
   } else {
     // Legacy artifact layout: the runner's signal handler is the only channel.
-    const pid = run.pid;
-    if (pid === undefined || !Number.isInteger(pid) || pid <= 1) {
-      return fail(409, `Run ${runId} has no control inbox and no usable pid.`, "run_unsupported", "no_pid");
-    }
-    // Recorded vs current scope must agree when both are present: a mismatch is
-    // how a recycled pid is caught before it is signaled.
-    const recorded = run.pidNamespaceScope;
-    const current = subagentsControlDeps.pidNamespaceScope(pid);
-    if (recorded && current && recorded !== current) {
-      return fail(409, `Pid ${pid} of run ${runId} lives in another pid namespace.`, "run_not_pausable", "pid_unverifiable");
-    }
+    const pid = legacySignalPid(runId, run, "run_not_pausable");
+    if (typeof pid !== "number") return pid;
     try {
       subagentsControlDeps.kill(pid, INTERRUPT_SIGNAL);
     } catch (error) {
@@ -159,6 +176,71 @@ async function pause(runId: string, location: PiSubagentRunLocation, run: PiSuba
     body: {
       ok: true,
       action: "pause",
+      runId,
+      state: observed.state,
+      transitioned: observed.state !== "running",
+      mechanism,
+    },
+  };
+}
+
+/**
+ * HARD stop: the package's stop inbox ends the run (`status.json` `stopped`, not
+ * resumable) where the interrupt inbox only pauses it. A legacy artifact has no
+ * stop channel at all — its one handler is the interrupt — so that arm pauses
+ * and reports the paused state it observed rather than claiming a stop.
+ */
+async function stop(runId: string, location: PiSubagentRunLocation, run: PiSubagentRun): Promise<SubagentsControlResult> {
+  if (run.state !== "running") {
+    return fail(409, `Run ${runId} is ${run.state}, not running.`, "stop_rejected", "not_running");
+  }
+
+  let mechanism: "control-inbox" | "signal";
+  if (existsSync(controlDir(location.runDir))) {
+    // The package refuses a stop once the runner closed its inbox, and checks the
+    // marker first; so does this arm, before anything is written.
+    const closedPath = join(controlDir(location.runDir), "stop-inbox-closed.json");
+    if (existsSync(closedPath)) {
+      return fail(409, `Run ${runId} no longer accepts stop requests.`, "stop_rejected", "inbox_closed");
+    }
+    const request = { type: "stop", ts: subagentsControlDeps.now(), source: "pi-web" };
+    const requestPath = join(controlDir(location.runDir), "stop-requests", stopRequestFileName(request.ts, subagentsControlDeps.randomId()));
+    try {
+      subagentsControlDeps.writeJson(requestPath, request);
+    } catch (error) {
+      return fail(502, `Could not write the stop request for run ${runId}: ${error instanceof Error ? error.message : String(error)}`, "stop_failed", "write_failed");
+    }
+    // The runner may have finished between the check and the write; the package
+    // takes such a request back, so a later revival cannot consume a stale stop.
+    if (existsSync(closedPath)) {
+      try {
+        unlinkSync(requestPath);
+      } catch {
+        // Already gone; nothing left to take back.
+      }
+      return fail(409, `Run ${runId} no longer accepts stop requests.`, "stop_rejected", "inbox_closed");
+    }
+    mechanism = "control-inbox";
+  } else {
+    // Legacy artifact layout: no stop channel exists, so the signal pauses.
+    const pid = legacySignalPid(runId, run, "stop_rejected");
+    if (typeof pid !== "number") return pid;
+    try {
+      subagentsControlDeps.kill(pid, INTERRUPT_SIGNAL);
+    } catch (error) {
+      const raw = (error as NodeJS.ErrnoException)?.code;
+      const reason = raw === "EPERM" ? "eperm" : raw === "ESRCH" ? "esrch" : raw === "ENOSYS" ? "enosys" : String(raw ?? "unknown").toLowerCase();
+      return fail(502, `Could not stop run ${runId}: ${error instanceof Error ? error.message : String(error)}`, "stop_failed", reason);
+    }
+    mechanism = "signal";
+  }
+
+  const observed = await pollUntilNotRunning(location, run, subagentsControlDeps);
+  return {
+    status: 200,
+    body: {
+      ok: true,
+      action: "stop",
       runId,
       state: observed.state,
       transitioned: observed.state !== "running",
@@ -324,8 +406,8 @@ export async function subagentsControl(
     return fail(400, "runId must match [A-Za-z0-9._-]+ and not be a path segment.", "invalid_request", "run_id_invalid");
   }
   const runId = input.runId;
-  if (input.action !== "pause" && input.action !== "steer") {
-    return fail(400, 'action must be "pause" or "steer".', "invalid_request", "action_invalid");
+  if (input.action !== "pause" && input.action !== "steer" && input.action !== "stop") {
+    return fail(400, 'action must be "pause", "steer" or "stop".', "invalid_request", "action_invalid");
   }
   let message = "";
   if (input.action === "steer") {
@@ -365,6 +447,7 @@ export async function subagentsControl(
   }
 
   if (input.action === "pause") return pause(runId, location, run);
+  if (input.action === "stop") return stop(runId, location, run);
   if (run.state === "running") {
     if (!existsSync(controlDir(location.runDir))) {
       // Pre-0.71 artifact layout: no inbox to write, and signals cannot steer.

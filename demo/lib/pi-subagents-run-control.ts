@@ -1,7 +1,7 @@
 // Client side of the pi-subagents run bridge (docs/adr/0007-subagents-control-bridging.md).
-// A child transcript's chat is the control surface: its Send steers the run and
-// its Stop pauses it. Client-safe — types and fetch only, no node builtins — so
-// the demo mirrors this file.
+// A child transcript's chat is the control surface: its Send steers the run, its
+// Stop hard-stops it and its Pause interrupts it. Client-safe — types and fetch
+// only, no node builtins — so the demo mirrors this file.
 import type { PiSubagentRunState } from "./pi-subagents-snapshot";
 
 /** The run states whose progress still changes, i.e. where Send means something. */
@@ -10,9 +10,10 @@ export function piSubagentRunLive(state: PiSubagentRunState | undefined): boolea
 }
 
 /**
- * Whether Stop can pause the run. The route's own pause guard is
- * `state === "running"` (a queued run has no runner to interrupt yet), so Stop is
- * offered only there; a queued run stays Send-only.
+ * Whether the run behind this chat can be stopped or paused. The route's own
+ * guards are `state === "running"` for both: a queued run has no runner to
+ * interrupt yet, and a terminal one has nothing left to end. A queued run stays
+ * Send-only.
  */
 export function piSubagentRunPausable(state: PiSubagentRunState | undefined): boolean {
   return state === "running";
@@ -49,9 +50,10 @@ export type PiSubagentRunStatusResult =
 
 export interface PiSubagentRunControlResult {
   ok: true;
-  action: "pause" | "steer";
+  action: "pause" | "steer" | "stop";
   runId: string;
-  state?: string;
+  /** The state the route observed after its poll — the artifact's own vocabulary. */
+  state?: PiSubagentRunState;
   transitioned?: boolean;
   mechanism?: string;
   delivery?: string;
@@ -97,7 +99,7 @@ export async function fetchPiSubagentRunStatus(
  */
 export async function sendPiSubagentRunControl(
   runId: string,
-  action: "pause" | "steer",
+  action: "pause" | "steer" | "stop",
   options: { message?: string; targetIndex?: number } = {},
 ): Promise<PiSubagentRunControlResponse> {
   const response = await fetch("/api/subagents/runs", {
@@ -120,6 +122,20 @@ export function piSubagentRunControlNotice(
   result: PiSubagentRunControlResult,
   t: (key: string, params?: Record<string, string | number>) => string,
 ): { type: "info" | "error"; message: string } {
+  if (result.action === "stop") {
+    // A pre-0.71 run has no stop channel at all: the legacy arm interrupted it,
+    // which pauses. Say what was observed instead of naming a stop that never
+    // happened (the same is true if another supervisor paused it concurrently).
+    if (result.state === "paused") {
+      return { type: "info", message: t("chat.subagent.stopPaused") };
+    }
+    // `transitioned` is the observed state flip: a stop that did not land yet is
+    // still in flight, and the runner has not gone to `stopped`.
+    return {
+      type: "info",
+      message: result.transitioned ? t("chat.subagent.stopped") : t("chat.subagent.stopPending"),
+    };
+  }
   if (result.action === "pause") {
     return {
       type: "info",

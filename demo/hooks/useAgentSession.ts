@@ -613,7 +613,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
    * list the gate reads, because the action changed the run's own `status.json`.
    */
   const sendRunControl = useCallback(async (
-    action: "pause" | "steer",
+    action: "pause" | "steer" | "stop",
     options: { message?: string; targetIndex?: number } = {},
   ): Promise<PiSubagentRunControlResponse> => {
     if (!controlledRunId) throw new Error("This chat has no pi-subagents run to control");
@@ -623,6 +623,12 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       // ourselves; everything else is left to the next poll or list read.
       if (action === "pause" && result.data.transitioned) {
         setRunState({ runId: controlledRunId, state: "paused" });
+      }
+      // A stop is a terminal transition the request observed itself, so the gate
+      // closes without waiting for the poll. The reported state is the one the
+      // route saw: a legacy-layout fallback reports `paused`, never a claimed stop.
+      if (action === "stop" && result.data.transitioned && result.data.state) {
+        setRunState({ runId: controlledRunId, state: result.data.state });
       }
       onSubagentRunControl?.();
     }
@@ -1863,15 +1869,17 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   executeBashRef.current = executeBash;
 
   const handleAbort = useCallback(async () => {
-    // Stop on a child chat pauses the run behind it, mirroring the main chat's
-    // Stop affordance; the child wrapper itself is idle and has nothing to abort.
+    // Stop on a child chat hard-stops the run behind it: the composer's Stop is
+    // the same affordance as the main chat's, but a UI Stop must end the run, not
+    // park it as a resumable pause (the Pause button is that gesture). The child
+    // wrapper itself is idle and has nothing to abort.
     if (controlledRunId && piSubagentRunPausable(observedRunState)) {
       try {
-        const result = await sendRunControl("pause");
+        const result = await sendRunControl("stop");
         if (!result.ok) addNotice({ type: "error", message: result.failure.error });
         else if (translate) addNotice(piSubagentRunControlNotice(result.data, translate));
       } catch (error) {
-        console.error("Failed to pause the subagent run:", error);
+        console.error("Failed to stop the subagent run:", error);
         addNotice({ type: "error", message: error instanceof Error ? error.message : String(error) });
       }
       return;
@@ -1892,6 +1900,20 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       console.error("Failed to abort:", e);
     }
   }, [addNotice, controlledRunId, observedRunState, sendRunControl, translate]);
+
+  // The softer gesture beside Stop: an interrupt that pauses the run and leaves
+  // it resumable, which the composer's next send turns into a parent-mediated
+  // resume (docs/adr/0007).
+  const handleSubagentPause = useCallback(async () => {
+    try {
+      const result = await sendRunControl("pause");
+      if (!result.ok) addNotice({ type: "error", message: result.failure.error });
+      else if (translate) addNotice(piSubagentRunControlNotice(result.data, translate));
+    } catch (error) {
+      console.error("Failed to pause the subagent run:", error);
+      addNotice({ type: "error", message: error instanceof Error ? error.message : String(error) });
+    }
+  }, [addNotice, sendRunControl, translate]);
 
   const handleFork = useCallback(async (entryId: string) => {
     if (bashRunningRef.current) return;
@@ -2728,6 +2750,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     subagentRunControlled: Boolean(controlledRunId),
     subagentRunSteerable: Boolean(controlledRunId) && piSubagentRunSteerable(observedRunState),
     subagentRunPausable: Boolean(controlledRunId) && piSubagentRunPausable(observedRunState),
+    handleSubagentPause,
     handleBuiltinSlashCommand,
     handleEditContent,
     // Present only while a history edit is pending.

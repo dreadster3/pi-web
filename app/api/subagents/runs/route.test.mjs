@@ -35,8 +35,10 @@ function fixture(t) {
   function writeRun(runId, status, options = {}) {
     const runDir = join(root, "async-subagent-runs", runId);
     mkdirSync(join(runDir, "control", "steer-requests"), { recursive: true });
+    mkdirSync(join(runDir, "control", "stop-requests"), { recursive: true });
     if (options.legacy) rmSync(join(runDir, "control"), { recursive: true, force: true });
     if (options.inboxClosed) writeFileSync(join(runDir, "control", "steer-inbox-closed.json"), "{}");
+    if (options.stopInboxClosed) writeFileSync(join(runDir, "control", "stop-inbox-closed.json"), "{}");
     writeFileSync(join(runDir, "status.json"), JSON.stringify(status));
     return runDir;
   }
@@ -182,6 +184,130 @@ test("pause refuses a run that is not running", async (t) => {
   assert.equal(status, 409);
   assert.equal(body.code, "run_not_pausable");
   assert.equal(body.reason, "not_running");
+});
+
+test("stop writes the package's stop request and reports the flip it observed", async (t) => {
+  const { writeRun, runDir } = fixture(t);
+  const dir = writeRun("run-1", runningRun());
+  let written;
+  inject({
+    writeJson: (path, value) => {
+      written = { path, value };
+      // The runner's stop handler ends the run for good; the route must report
+      // that state, never a pause or a claimed stop it did not see.
+      writeFileSync(join(runDir("run-1"), "status.json"), JSON.stringify({ ...runningRun(), state: "stopped" }));
+    },
+  });
+
+  const { status, body } = await post({ runId: "run-1", action: "stop" });
+  assert.equal(status, 200);
+  assert.deepEqual(body, {
+    ok: true,
+    action: "stop",
+    runId: "run-1",
+    state: "stopped",
+    transitioned: true,
+    mechanism: "control-inbox",
+  });
+  // The file name is the package's contract: 13-digit padded ts, a uuid.
+  assert.equal(written.path, join(dir, "control", "stop-requests", "1700000000000-req-1.json"));
+  assert.deepEqual(written.value, { type: "stop", ts: 1_700_000_000_000, source: "pi-web" });
+});
+
+test("stop reports an honest running state when the request did not land", async (t) => {
+  const { writeRun } = fixture(t);
+  writeRun("run-1", runningRun());
+  inject({ writeJson: () => {} });
+
+  const { status, body } = await post({ runId: "run-1", action: "stop" });
+  assert.equal(status, 200, "a delivered request that did not land is not an error");
+  assert.equal(body.state, "running");
+  assert.equal(body.transitioned, false);
+});
+
+test("stop refuses a closed stop inbox, before it writes anything", async (t) => {
+  const { writeRun, runDir } = fixture(t);
+  writeRun("run-1", runningRun(), { stopInboxClosed: true });
+  inject({});
+
+  const { status, body } = await post({ runId: "run-1", action: "stop" });
+  assert.equal(status, 409);
+  assert.deepEqual(body, {
+    error: "Run run-1 no longer accepts stop requests.",
+    code: "stop_rejected",
+    reason: "inbox_closed",
+  });
+  assert.deepEqual(readdirSync(join(runDir("run-1"), "control", "stop-requests")), []);
+});
+
+test("stop refuses a run that is not running", async (t) => {
+  const { writeRun } = fixture(t);
+  writeRun("run-1", runningRun({ state: "paused", steps: [{ agent: "scout", status: "paused" }] }));
+  inject({});
+
+  const { status, body } = await post({ runId: "run-1", action: "stop" });
+  assert.equal(status, 409);
+  assert.deepEqual(body, {
+    error: "Run run-1 is paused, not running.",
+    code: "stop_rejected",
+    reason: "not_running",
+  });
+});
+
+test("stop reports a failed write as stop_failed, never as a stop", async (t) => {
+  const { writeRun } = fixture(t);
+  writeRun("run-1", runningRun());
+  const failure = Object.assign(new Error("ENOSPC"), { code: "ENOSPC" });
+  inject({ writeJson: () => { throw failure; } });
+
+  const { status, body } = await post({ runId: "run-1", action: "stop" });
+  assert.equal(status, 502);
+  assert.equal(body.code, "stop_failed");
+  assert.equal(body.reason, "write_failed");
+  assert.match(body.error, /ENOSPC/);
+});
+
+test("stop on a legacy run pauses it, and says so instead of claiming a stop", async (t) => {
+  const { writeRun, runDir } = fixture(t);
+  writeRun("run-1", runningRun({ pid: 4242, pidNamespaceScope: "pid:[4026531836]" }), { legacy: true });
+  const signals = [];
+  inject({
+    kill: (pid, signal) => {
+      signals.push([pid, signal]);
+      // The pre-0.71 handler interrupts: the run pauses, it does not stop.
+      writeFileSync(join(runDir("run-1"), "status.json"), JSON.stringify({
+        ...runningRun({ pid: 4242, pidNamespaceScope: "pid:[4026531836]" }),
+        state: "paused",
+        steps: [{ agent: "scout", status: "paused" }],
+      }));
+    },
+    pidNamespaceScope: () => "pid:[4026531836]",
+  });
+
+  const { status, body } = await post({ runId: "run-1", action: "stop" });
+  assert.equal(status, 200);
+  // The one handler a pre-0.71 runner has is its interrupt: it pauses, and the
+  // response reports the paused state rather than a stop that never happened.
+  assert.deepEqual(body, {
+    ok: true,
+    action: "stop",
+    runId: "run-1",
+    state: "paused",
+    transitioned: true,
+    mechanism: "signal",
+  });
+  assert.deepEqual(signals, [[4242, process.platform === "win32" ? "SIGBREAK" : "SIGUSR2"]]);
+});
+
+test("stop refuses a legacy run without a usable pid", async (t) => {
+  const { writeRun } = fixture(t);
+  writeRun("run-nopid", runningRun(), { legacy: true });
+  inject({});
+
+  const { status, body } = await post({ runId: "run-nopid", action: "stop" });
+  assert.equal(status, 409);
+  assert.equal(body.code, "run_unsupported");
+  assert.equal(body.reason, "no_pid");
 });
 
 test("steer on a running run writes the package's own request file and polls its receipt", async (t) => {
