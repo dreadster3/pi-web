@@ -28,6 +28,8 @@ Existing sessions stay grouped under the same project. Opening an existing sessi
 
 A new session can also pick its checkout right above the message box. While a new chat is still empty, a small bar there shows its project and, at a repository root, its worktree. Choosing another one moves the new chat there, keeping what you have typed, attached images, and the model and reasoning level you picked (a model the other project does not offer goes back to automatic). It offers the same project and worktree menus as the sidebar's Files tab, with `Use default directory` and `Open another project...` for any other folder; only the Files tab removes worktrees. A project's `+` in the sidebar starts the new chat in the worktree you are using for that project (or in the main checkout of another project); use the bar to pick a different one.
 
+Under the checkouts, both menus also list the project's local branches (`Local branches`): picking one checks it out in its worktree, or creates that worktree if the branch has none.
+
 ## Creating a Worktree
 
 Choose `New worktree...` from the worktree menu and enter a branch name. From the bar above an empty new chat, the new chat then moves into the new worktree.
@@ -63,6 +65,8 @@ Removing a worktree does not delete:
 - The main checkout.
 
 If the worktree has uncommitted or untracked files, Git refuses the removal. Pi Web then offers a force remove action. Force removal discards the uncommitted files in that checkout, so use it only when you no longer need those changes.
+
+The Files tab's worktree menu can also delete a local branch: the row's delete button asks first, and a branch with unmerged commits is refused until you confirm the force delete.
 
 ## Sessions and Worktrees
 

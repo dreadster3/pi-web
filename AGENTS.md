@@ -60,6 +60,7 @@ app/api/
   git/status/route.ts              GET changed files for a cwd
   git/diff/route.ts                GET diff of one changed file
   worktrees/route.ts               GET/POST/DELETE git worktrees
+  branches/route.ts                DELETE a local branch (409 unmerged arms the picker's force retry)
   terminal/route.ts                POST create a terminal session
   terminal/[id]/route.ts           GET { id, cwd } (404 once closed; stream at [id]/events) | POST input/resize | DELETE kill
   mcp/route.ts                     GET [?cwd=] Settings › MCP overview, files only | POST add/enable/disable/remove/undo/set-enabled/set-exposure/set-in-project/sign-out
