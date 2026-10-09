@@ -35,9 +35,17 @@
         default = (pkgsFor system).mkShell {
           packages = [
             (pkgsFor system).nodejs_24
+            (pkgsFor system).playwright-driver.browsers
           ];
           # next dev telemetry is sandbox-irrelevant here but quiet locally too.
           NEXT_TELEMETRY_DISABLED = "1";
+          # The e2e suite launches the Chromium revision package-lock.json pins;
+          # nixpkgs ships the same revision built against NixOS' libraries, so
+          # point Playwright at it instead of its own download (see
+          # https://nixos.wiki/wiki/Playwright). nixpkgs and npm must stay on the
+          # same Playwright version for the revision to match.
+          PLAYWRIGHT_BROWSERS_PATH = "${(pkgsFor system).playwright-driver.browsers}";
+          PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS = "true";
         };
       });
     };
