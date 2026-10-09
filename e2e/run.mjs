@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { appendFileSync, createWriteStream, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, createWriteStream, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -17,10 +17,51 @@ import { checkModelDiscovery } from "./model-discovery.mjs";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const mode = process.env.E2E_SERVER_MODE || "dev";
-assert.ok(mode === "dev" || mode === "start", "E2E_SERVER_MODE must be dev or start");
-assert.ok(mode !== "dev" || !existsSync(join(root, ".next/dev/lock")), "Use a checkout without an active dev server");
 const artifacts = join(root, "test-results/e2e");
+assert.ok(mode === "dev" || mode === "start", "E2E_SERVER_MODE must be dev or start");
+// Next.js serializes dev servers per checkout through .next/dev/lock. Name the
+// holder: a checkout that kept a lock after a crashed server looks identical to
+// one with a running dev server, and "delete the file" is the whole fix.
+assert.ok(
+  mode !== "dev" || !existsSync(join(root, ".next/dev/lock")),
+  `Use a checkout without an active dev server${lockHolder(root)}`,
+);
+function lockHolder(root) {
+  try {
+    const { pid, port } = JSON.parse(readFileSync(join(root, ".next/dev/lock"), "utf8"));
+    return pid ? ` (.next/dev/lock says pid ${pid} on port ${port}; delete it if that process is gone)` : "";
+  } catch {
+    return "";
+  }
+}
+
+// The readiness asserts below would otherwise report "see server.log" for a
+// server that never answered; the log lives in a gitignored directory, so quote
+// its tail here where the failure is reported.
+function serverLogTail() {
+  return serverOutput.trimEnd()
+    ? `\n--- server.log tail ---\n${serverOutput.trimEnd().split("\n").slice(-20).join("\n")}`
+    : "";
+}
+
 mkdirSync(artifacts, { recursive: true });
+
+// This suite is the entry point the README points at, so report the provisioning
+// step instead of Playwright's launcher error. A host without the lock-pinned
+// browser revision, or one whose Chromium cannot load its system libraries,
+// otherwise fails as "Target page, context or browser has been closed".
+async function launchChromium() {
+  try {
+    return await chromium.launch();
+  } catch (error) {
+    throw new Error([
+      `Cannot launch Playwright's Chromium at ${chromium.executablePath()}.`,
+      "Install it for this checkout's pinned revision: npx playwright install chromium",
+      "On an immutable host (NixOS) the system libraries are missing as well; point Playwright at nixpkgs' patched browsers:",
+      "  PLAYWRIGHT_BROWSERS_PATH=$(nix build --no-link --print-out-paths nixpkgs#playwright-driver.browsers) npm run test:e2e",
+    ].join("\n"), { cause: error });
+  }
+}
 const agentDir = mkdtempSync(join(tmpdir(), "pi-web-e2e-"));
 const project = join(agentDir, "project");
 const sessionDir = join(agentDir, "sessions", "e2e");
@@ -50,6 +91,7 @@ function writeSession(id, entries) {
 
 let server;
 let serverExited;
+let serverOutput = "";
 let browser;
 let page;
 let context;
@@ -151,11 +193,24 @@ try {
   const base = `http://127.0.0.1:${port}`;
   server = spawn(process.execPath, [join(root, "node_modules/next/dist/bin/next"), mode, "-H", "127.0.0.1", "-p", String(port)], {
     cwd: root,
-    env: { ...process.env, PI_CODING_AGENT_DIR: agentDir, PI_WEB_PASSWORD: "", NEXT_TELEMETRY_DISABLED: "1" },
+    env: {
+      ...process.env,
+      // Pin the server mode instead of inheriting the host shell's NODE_ENV:
+      // dev and start must compile the same way on every checkout.
+      NODE_ENV: mode === "dev" ? "development" : "production",
+      PI_CODING_AGENT_DIR: agentDir,
+      PI_WEB_PASSWORD: "",
+      NEXT_TELEMETRY_DISABLED: "1",
+    },
     stdio: ["ignore", "pipe", "pipe"],
   });
   server.once("error", (error) => { serverError = error; });
   serverExited = once(server, "exit");
+  // Keep the tail in memory as well: the file stream is still buffering when a
+  // crashed server is reported, so reading it back yields an empty log.
+  const capture = (chunk) => { serverOutput = (serverOutput + chunk).slice(-16_384); };
+  server.stdout.on("data", capture);
+  server.stderr.on("data", capture);
   server.stdout.pipe(serverLog, { end: false });
   server.stderr.pipe(serverLog, { end: false });
 
@@ -179,14 +234,14 @@ try {
   const deadline = Date.now() + 120_000;
   while (true) {
     if (serverError) throw serverError;
-    assert.equal(server.exitCode, null, "Server exited before readiness; see server.log");
+    assert.equal(server.exitCode, null, `Server exited before readiness; see server.log${serverLogTail()}`);
     const response = await fetch(`${base}/api/sessions`, { signal: AbortSignal.timeout(5000) }).catch(() => null);
     if (response?.ok) {
       const { sessions } = await response.json();
       assert.deepEqual(sessions.map((session) => session.id).sort(), [LONG, BRANCH, RICH, COMPACTED, APPEND, CODE_BACKGROUND].sort());
       break;
     }
-    assert.ok(Date.now() < deadline, "Server readiness timed out; see server.log");
+    assert.ok(Date.now() < deadline, `Server readiness timed out; see server.log${serverLogTail()}`);
     await delay(250);
   }
 
@@ -235,7 +290,7 @@ try {
     console.log("PASS: external session-file appends are visible on force/mount reads");
   }
 
-  browser = await chromium.launch();
+  browser = await launchChromium();
   for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 }]) {
     context = await browser.newContext({ viewport, locale: "en-US" });
     await context.tracing.start({ screenshots: true, snapshots: true });
@@ -252,7 +307,14 @@ try {
     });
     const stateReady = page.waitForResponse((response) => new URL(response.url()).pathname === `/api/sessions/${LONG}/state`);
     await page.goto(`${base}/?session=${LONG}`, { waitUntil: "domcontentloaded" });
-    assert.equal((await stateReady).status(), 200);
+    // A page that never renders (a devDependency missing after `npm ci` under an
+    // exported NODE_ENV=production, say) otherwise reports a bare /state timeout
+    // and hides the compile error and the 500 the server logged.
+    try {
+      assert.equal((await stateReady).status(), 200);
+    } catch (error) {
+      throw new Error(`${error.message}${serverLogTail()}`, { cause: error });
+    }
     await page.getByText(text(4999), { exact: true }).waitFor();
     const latestUser = await page.getByText(text(4998), { exact: true }).elementHandle();
     assert.ok(latestUser, "Latest user message must be mounted before pagination");
