@@ -240,6 +240,29 @@ test("stop refuses a closed stop inbox, before it writes anything", async (t) =>
   assert.deepEqual(readdirSync(join(runDir("run-1"), "control", "stop-requests")), []);
 });
 
+test("stop takes its request back when the runner closes the inbox mid-write", async (t) => {
+  const { writeRun, runDir } = fixture(t);
+  const dir = writeRun("run-1", runningRun());
+  inject({
+    writeJson: (path, value) => {
+      // The runner's stop handler closes the inbox in the window between the
+      // first check and this write; its own take-back rule means the request
+      // must not survive to be consumed by a later revival.
+      writeFileSync(path, `${JSON.stringify(value)}\n`);
+      writeFileSync(join(dir, "control", "stop-inbox-closed.json"), "{}");
+    },
+  });
+
+  const { status, body } = await post({ runId: "run-1", action: "stop" });
+  assert.equal(status, 409);
+  assert.deepEqual(body, {
+    error: "Run run-1 no longer accepts stop requests.",
+    code: "stop_rejected",
+    reason: "inbox_closed",
+  });
+  assert.deepEqual(readdirSync(join(runDir("run-1"), "control", "stop-requests")), [], "the request was taken back");
+});
+
 test("stop refuses a run that is not running", async (t) => {
   const { writeRun } = fixture(t);
   writeRun("run-1", runningRun({ state: "paused", steps: [{ agent: "scout", status: "paused" }] }));

@@ -27,7 +27,7 @@ export async function GET(req: Request) {
 }
 
 /**
- * POST /api/subagents/runs — one control action (`pause` | `steer`) for one
+ * POST /api/subagents/runs — one control action (`pause` | `steer` | `stop`) for one
  * pi-subagents async run. See docs/adr/0007-subagents-control-bridging.md: the
  * package is not a dependency, so the run is addressed by its on-disk name and
  * every outcome is observed, never assumed. Every failure answers in the ADR's
