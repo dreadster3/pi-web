@@ -36,8 +36,11 @@ import {
   piSubagentRunControlNotice,
   piSubagentRunPausable,
   piSubagentRunSteerable,
+  piSubagentSteerDelivery,
   sendPiSubagentRunControl,
+  type PiSubagentPendingSteer,
   type PiSubagentRunControlResponse,
+  type PiSubagentRunStatus,
 } from "@/lib/pi-subagents-run-control";
 import type { PiSubagentRunState } from "@/lib/pi-subagents-snapshot";
 import { bareMcpOpensSettings } from "@/lib/mcp-command";
@@ -591,6 +594,10 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const controlledRunId = session?.relation?.kind === "subagent" ? session.relation.runId : undefined;
   const controlledStepIndex = session?.relation?.kind === "subagent" ? session.relation.stepIndex : undefined;
   const [runState, setRunState] = useState<{ runId: string; state: PiSubagentRunState | null } | null>(null);
+  // The run's own steer receipts from the last poll, kept apart from `runState`:
+  // the gate only needs the observed state, while clearing a queued steer row
+  // needs the receipts and must re-run when they change.
+  const [steerReceipts, setSteerReceipts] = useState<PiSubagentRunStatus["steering"]>(undefined);
   // The sidebar row's own status, until a poll answers for this run.
   const seededRunState = session?.relation?.kind === "subagent"
     ? (session.relation.status === "running" ? "running" as const : undefined)
@@ -600,6 +607,17 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const observedRunState: PiSubagentRunState | undefined = runState && runState.runId === controlledRunId
     ? (runState.state ?? undefined)
     : seededRunState;
+
+  // Steers this chat sent that the run has not confirmed yet. Ephemeral client
+  // state (no persistence): a steer's only durable trace is the run's own
+  // `steering.recent[]`, which the poll below reads back to clear the row.
+  const [pendingSteers, setPendingSteers] = useState<PiSubagentPendingSteer[]>([]);
+  const dropPendingSteer = useCallback((requestId: string) => {
+    setPendingSteers((prev) => prev.filter((steer) => steer.requestId !== requestId));
+  }, []);
+  const addPendingSteer = useCallback((steer: PiSubagentPendingSteer) => {
+    setPendingSteers((prev) => [...prev.filter((existing) => existing.requestId !== steer.requestId), steer]);
+  }, []);
 
   useEffect(() => {
     if (!controlledRunId) return;
@@ -623,6 +641,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         if (stopped || controller !== current) return;
         if (result.ok) {
           setRunState({ runId: controlledRunId, state: result.data.state });
+          setSteerReceipts(result.data.steering);
         } else if (result.status === 404 || result.status === 400) {
           // A run that is gone or unaddressable will not come back at the same
           // id, so stop the poll and clear the gate: the composer falls back to a
@@ -1844,6 +1863,12 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           restoreSubmission(message, images, composerDraftKey);
           return;
         }
+        // The runner accepted a request it has not delivered yet: keep it on
+        // screen as a queued row until the poll reads its receipt back.
+        const requestId = result.data.requestId;
+        if (controlledRunId && result.data.delivery === "control-inbox" && result.data.steeringState === "queued" && requestId) {
+          addPendingSteer({ runId: controlledRunId, requestId, message });
+        }
         if (translate) addNotice(piSubagentRunControlNotice(result.data, translate));
       } catch (error) {
         console.error("Failed to steer the subagent run:", error);
@@ -1974,7 +1999,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       setAgentPhase(null);
       dispatch({ type: "end" });
     }
-  }, [isNew, newSessionCwd, newSessionModel, session, ensureNewSession, ensureEventsConnected, promoteNewSession, waitForPromptSettlement, addNotice, cancelEventStreamGrace, closeEvents, composerDraftKey, reconcileAgentState, restoreSubmission, editEntryId, setEdit, controlledRunId, controlledStepIndex, observedRunState, sendRunControl, translate]);
+  }, [isNew, newSessionCwd, newSessionModel, session, ensureNewSession, ensureEventsConnected, promoteNewSession, waitForPromptSettlement, addNotice, cancelEventStreamGrace, closeEvents, composerDraftKey, reconcileAgentState, restoreSubmission, editEntryId, setEdit, controlledRunId, controlledStepIndex, observedRunState, sendRunControl, translate, addPendingSteer]);
 
   const executeBash = useCallback(async (command: string, excludeFromContext: boolean) => {
     if (agentRunningRef.current || bashRunningRef.current) return;
@@ -2050,6 +2075,28 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       addNotice({ type: "error", message: error instanceof Error ? error.message : String(error) });
     }
   }, [addNotice, sendRunControl, translate]);
+
+  /**
+   * The run's receipt is the only durable trace a steer leaves, so each poll's
+   * `steering.recent[]` reconciles the queued rows: `delivered` (also the
+   * package's recovered/late) clears the row and re-reads the transcript that now
+   * holds the message, `failed` clears it with the same error notice a refused
+   * send gets, and no receipt yet keeps it on screen.
+   */
+  useEffect(() => {
+    if (!steerReceipts || pendingSteers.length === 0) return;
+    const status = { steering: steerReceipts };
+    for (const steer of pendingSteers) {
+      const delivery = piSubagentSteerDelivery(status, steer.requestId);
+      if (delivery === "queued") continue;
+      dropPendingSteer(steer.requestId);
+      if (delivery === "delivered") {
+        if (session?.id) void loadSession(session.id);
+      } else if (translate) {
+        addNotice({ type: "error", message: translate("chat.subagent.steerFailed") });
+      }
+    }
+  }, [steerReceipts, pendingSteers, session?.id, loadSession, dropPendingSteer, addNotice, translate]);
 
   const handleFork = useCallback(async (entryId: string) => {
     if (bashRunningRef.current) return;
@@ -2931,6 +2978,8 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     subagentRunSteerable: Boolean(controlledRunId) && piSubagentRunSteerable(observedRunState),
     subagentRunPausable: Boolean(controlledRunId) && piSubagentRunPausable(observedRunState),
     handleSubagentPause,
+    // Ephemeral by design: a queued steer row lives only in this mount.
+    pendingSubagentSteers: controlledRunId ? pendingSteers : [],
     handleBuiltinSlashCommand,
     handleEditContent,
     // Present only while a history edit is pending.

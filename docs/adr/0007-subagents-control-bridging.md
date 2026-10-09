@@ -157,12 +157,16 @@ is a `409 target_out_of_range`, and a child that is not `running`/`queued` is a
 parent-mediated `resume` call.
 
 `GET /api/subagents/runs?runId=` — one run's observed state, **read-only**:
-`{ "ok": true, "runId": "…", "state": "…", "mode": "…", "steps": ["running", …] }`.
+`{ "ok": true, "runId": "…", "state": "…", "mode": "…", "steps": ["running", …],
+  "steering": [{ "requestId": "…", "states": ["queued", …] }] }`.
 A child transcript's composer has no `subagent-async` widget of its own (the
 package scopes that widget to the launching session), so it polls this to gate
-Send/Stop; `steps` is the artifact's own order, which is what `targetIndex`
-addresses. It resolves and parses through the same code as the control actions
-and refuses with the same `{error, code, reason}` shape, writing nothing.
+Send/Stop and to clear a queued steer row; `steps` is the artifact's own order,
+which is what `targetIndex` addresses, and `steering` is the run's own
+`steering.recent[]` projected to the request id and its per-target states —
+nothing else crosses the wire. It resolves and parses through the same code as
+the control actions and refuses with the same `{error, code, reason}` shape,
+writing nothing.
 
 `runId` must match `[A-Za-z0-9._-]+`, reject the `.`/`..` segments explicitly,
 and resolve to `<root>/async-subagent-runs/<runId>/` inside a resolved temp
@@ -248,6 +252,17 @@ the runner will silently discard.
   interrupt path, which pauses: the response carries the observed `paused`
   state and the notice says the run paused because it has no stop channel,
   rather than claiming a stop.
+- **A queued steer is visible until the run confirms it.** A live run's chat
+  keeps the steers it sent as queued rows, the same affordance as the main
+  agent's queued message: recorded when the route answers `steeringState:
+  "queued"`, cleared when the poll reads the request's receipt out of
+  `steering.recent[]` — `delivered` (also the package's `recovered`/`late`) clears
+  it and re-reads the transcript that now holds the message, `failed` clears it
+  with the same error notice a refused prompt gets. The rows are **ephemeral
+  client state**, deliberately not persisted: the run's own artifact is the
+  durable record, so a reload simply shows the transcript and any still-unrouted
+  request is invisible until it lands — never a row the client invented and
+  cannot reconcile.
 - **The UI derives state from data it already has.** The chat composer is the
   control surface: it shows one row, Steer then Stop and Pause, the same
   gestures as a main-agent send and stop. Both state buttons read the run's own

@@ -28,6 +28,13 @@ export function piSubagentRunSteerable(state: PiSubagentRunState | undefined): b
   return piSubagentRunLive(state) || state === "paused";
 }
 
+/** One steer request's receipt, as the read-only GET reports it. */
+export interface PiSubagentSteerReceipt {
+  requestId: string;
+  /** Per-target delivery state, in the artifact's own order. */
+  states: string[];
+}
+
 /** One run's observed state, from the read-only GET the child chat polls. */
 export interface PiSubagentRunStatus {
   ok: true;
@@ -36,6 +43,36 @@ export interface PiSubagentRunStatus {
   mode: string;
   /** Per-step status in the artifact's own order — what `targetIndex` addresses. */
   steps: PiSubagentRunState[];
+  /** `steering.recent[]`, so a queued steer row can clear on the runner's receipt. */
+  steering?: PiSubagentSteerReceipt[];
+}
+
+/** One steer this chat sent and the run has not confirmed yet. */
+export interface PiSubagentPendingSteer {
+  runId: string;
+  requestId: string;
+  message: string;
+}
+
+export type PiSubagentSteerDelivery = "delivered" | "failed" | "queued";
+
+/**
+ * The run's own receipt for one steer request, aggregated exactly like the POST's
+ * `steeringState`: every targeted child delivered (or recovered/late) is
+ * delivered, any refusal is failed, and no receipt yet still reads as queued —
+ * accepted by the runner, not confirmed. Never model action.
+ */
+export function piSubagentSteerDelivery(
+  status: Pick<PiSubagentRunStatus, "steering">,
+  requestId: string,
+): PiSubagentSteerDelivery {
+  const receipt = status.steering?.find((entry) => entry.requestId === requestId);
+  if (!receipt) return "queued";
+  if (receipt.states.includes("failed")) return "failed";
+  return receipt.states.length > 0
+    && receipt.states.every((state) => state === "delivered" || state === "recovered" || state === "late")
+    ? "delivered"
+    : "queued";
 }
 
 export interface PiSubagentRunFailure {

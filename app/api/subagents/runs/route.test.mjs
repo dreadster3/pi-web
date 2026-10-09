@@ -606,8 +606,38 @@ test("GET reports one run's observed state and per-step statuses, read-only", as
   assert.equal(status, 200);
   // The order of `steps` is what the chat indexes a steer with, so it must be the
   // artifact's own order, not a filtered one.
-  assert.deepEqual(body, { ok: true, runId: "run-1", state: "running", mode: "chain", steps: ["running", "complete"] });
+  assert.deepEqual(body, {
+    ok: true,
+    runId: "run-1",
+    state: "running",
+    mode: "chain",
+    steps: ["running", "complete"],
+    steering: [],
+  });
   assert.deepEqual(readdirSync(join(runDir("run-1"), "control", "steer-requests")), [], "a read writes nothing");
+});
+
+test("GET carries each steer request's receipt, so a queued row can clear", async (t) => {
+  const { writeRun } = fixture(t);
+  writeRun("run-1", runningRun({
+    stepIndex: 0,
+    steering: {
+      requested: 2,
+      recent: [
+        { id: "req-queued", targets: [{ index: 0, state: "queued" }] },
+        { id: "req-done", targets: [{ index: 0, state: "delivered" }, { index: 1, state: "recovered" }] },
+      ],
+    },
+  }));
+  inject({});
+
+  const { body } = await get("run-1");
+  // Only the request id and its per-target states cross the wire: nothing the
+  // chat does not need, and the same vocabulary the POST aggregates.
+  assert.deepEqual(body.steering, [
+    { requestId: "req-queued", states: ["queued"] },
+    { requestId: "req-done", states: ["delivered", "recovered"] },
+  ]);
 });
 
 test("GET refuses a bad run id and answers absence with the same shape as POST", async (t) => {

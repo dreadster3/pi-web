@@ -316,6 +316,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
     loadContext, activeLeafId, scrollToBottom, scrollToMessage,
     subagentRunPausable,
     handleSubagentPause,
+    pendingSubagentSteers,
   } = useAgentSession({
     session, sessionRunning, newSessionCwd, newSessionDraftKey, initialNewSessionChoices, onNewSessionChoicesChange, onAgentEnd: wrappedOnAgentEnd, onAttentionNeeded, onSessionCreated, onSessionForked,
     modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSystemToolsChange, onSystemInfoLoaderChange, onSessionStatsPanelOpen,
@@ -1039,6 +1040,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
       onSetDefaultThinkingLevel={session || isNew ? handleSetDefaultThinkingLevel : undefined}
       retryInfo={retryInfo}
       queuedMessages={queuedMessages}
+      pendingSteers={pendingSubagentSteers}
       inputHistory={inputHistory}
       onRecallQueue={handleRecallQueue}
       slashCommands={slashCommands}

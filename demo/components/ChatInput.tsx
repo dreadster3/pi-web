@@ -93,6 +93,12 @@ interface Props {
   onSetDefaultThinkingLevel?: (level: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max") => void;
   retryInfo?: { attempt: number; maxAttempts: number; errorMessage?: string } | null;
   queuedMessages?: QueuedMessages | null;
+  /**
+   * Steers this child chat sent that the run has not confirmed yet: the same
+   * affordance as the main agent's queued row, cleared when the run's receipt
+   * says delivered (then the message is in the transcript) or refused.
+   */
+  pendingSteers?: { requestId: string; message: string }[];
   inputHistory?: string[];
   onRecallQueue?: () => void;
   slashCommands?: SlashCommandInfo[];
@@ -576,7 +582,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   onCompact, onAbortCompaction, isCompacting, compactError, compactResult, toolPreset, onToolPresetChange,
   thinkingLevel, isAutoThinkingSelection = false, onThinkingLevelChange, availableThinkingLevels, thinkingLevelMap,
   savedDefaultThinkingLevel, onSetDefaultThinkingLevel,
-  retryInfo, queuedMessages, inputHistory = [], onRecallQueue,
+  retryInfo, queuedMessages, pendingSteers, inputHistory = [], onRecallQueue,
   slashCommands, slashCommandsLoading, onLoadSlashCommands,
   onBuiltinCommand,
   soundEnabled, onSoundToggle, onAudioUnlock,
@@ -1766,6 +1772,33 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
             ))}
             {queuedMessages?.followUp.map((text, i) => (
               <QueuedMessageRow key={`followup-${i}`} kind="follow-up" text={text} />
+            ))}
+          </div>
+        )}
+        {/* Steers awaiting the run's receipt (pi-subagents has not delivered them
+            to the child yet). The main-agent recall does not apply: the run owns
+            these, so there is no button — the row clears on the runner's answer. */}
+        {(pendingSteers?.length ?? 0) > 0 && (
+          <div style={{
+            marginBottom: 8,
+            border: "1px solid var(--border)",
+            borderRadius: 6,
+            background: "var(--bg-panel)",
+            padding: "5px 0",
+          }}>
+            <div style={{ padding: "2px 8px 4px 10px" }}>
+              <span style={{
+                fontSize: 10,
+                fontFamily: "var(--font-mono)",
+                color: "var(--text-dim)",
+                textTransform: "uppercase",
+                letterSpacing: 0.4,
+              }}>
+                {t("chat.queued", { count: pendingSteers?.length ?? 0 })}
+              </span>
+            </div>
+            {pendingSteers?.map((steer) => (
+              <QueuedMessageRow key={steer.requestId} kind="steer" text={steer.message} />
             ))}
           </div>
         )}

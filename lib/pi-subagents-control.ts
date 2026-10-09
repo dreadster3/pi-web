@@ -479,6 +479,20 @@ export function subagentsRunStatus(input: { runId: unknown }): SubagentsControlR
     return fail(404, `Run '${runId}' has no readable status.json.`, "run_not_found", "no_status");
   }
   // Step statuses let the chat gate the one child it shows; `mode` tells it
-  // whether that child can be addressed by index at all.
-  return { status: 200, body: { ok: true, runId, state: run.state, mode: run.mode, steps: run.steps.map((step) => step.status) } };
+  // whether that child can be addressed by index at all; `steering` is what lets
+  // the chat clear a queued steer row the runner has actually consumed.
+  return {
+    status: 200,
+    body: {
+      ok: true,
+      runId,
+      state: run.state,
+      mode: run.mode,
+      steps: run.steps.map((step) => step.status),
+      steering: (run.steering ?? []).map((request) => ({
+        requestId: request.id,
+        states: request.targets.map((target) => target.state),
+      })),
+    },
+  };
 }

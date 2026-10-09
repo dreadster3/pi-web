@@ -152,6 +152,48 @@ test("a streaming main session keeps its own Stop and never borrows the run's Pa
   assert.doesNotMatch(streaming, />Pause</);
 });
 
+test("a queued steer renders above the transcript and clears on the runner's receipt", () => {
+  // The row is the main agent's queued affordance reused: same kind chip and text.
+  const queued = renderComposer({
+    isStreaming: false,
+    subagentRunPausable: true,
+    onSubagentPause() {},
+    pendingSteers: [{ requestId: "req-1", message: "look at the parser too" }],
+  });
+  assert.match(queued, /look at the parser too/);
+  assert.match(queued, />steer</, "it reads as a steer, like the main chat's queued row");
+  // No recall button: the run owns these messages, not this composer.
+  assert.doesNotMatch(queued, /Recall to input/);
+
+  // The receipt cleared the row, so nothing queued is rendered at all.
+  const cleared = renderComposer({ isStreaming: false, subagentRunPausable: true, onSubagentPause() {}, pendingSteers: [] });
+  assert.doesNotMatch(cleared, /look at the parser too/);
+  assert.doesNotMatch(cleared, />steer</);
+});
+test("the hook keeps pending steers ephemeral and reconciles them on each poll", () => {
+  // Pending steers live only in this mount: no persistence call touches them.
+  assert.match(hookSource, /const \[pendingSteers, setPendingSteers\] = useState<PiSubagentPendingSteer\[\]>\(\[\]\)/);
+  // A queued steer is recorded when the route says the runner accepted it.
+  assert.match(
+    hookSource,
+    /result\.data\.delivery === "control-inbox" && result\.data\.steeringState === "queued"[\s\S]*?addPendingSteer\(/,
+  );
+  // The poll's receipts are what clear it, and a delivered one refetches the
+  // transcript that now holds the message.
+  assert.match(hookSource, /setSteerReceipts\(result\.data\.steering\)/);
+  assert.match(
+    hookSource,
+    /const delivery = piSubagentSteerDelivery\(status, steer\.requestId\)[\s\S]*?if \(delivery === "delivered"\) \{[\s\S]*?void loadSession\(session\.id\)/,
+  );
+  // A refusal clears the row and reuses the same error notice as a refused send.
+  assert.match(hookSource, /else if \(translate\) \{[\s\S]{0,80}chat\.subagent\.steerFailed/);
+  // The composer receives them only for the run-backed chat it is showing.
+  assert.match(hookSource, /pendingSubagentSteers: controlledRunId \? pendingSteers : \[\]/);
+  assert.match(chatWindowSource, /pendingSteers=\{pendingSubagentSteers\}/);
+  assert.match(chatInputSource, /\{pendingSteers\?\.map\(\(steer\) => \(/);
+  assert.match(chatInputSource, /<QueuedMessageRow key=\{steer\.requestId\} kind="steer" text=\{steer\.message\} \/>/);
+});
+
 test("a control response refetches the list the gate is seeded from", async () => {
   assert.match(hookSource, /onSubagentRunControl\?\.\(\)/);
   const appShellSource = await readFile(new URL("./AppShell.tsx", import.meta.url), "utf8");
