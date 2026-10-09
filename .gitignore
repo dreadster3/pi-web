@@ -47,3 +47,4 @@ e2e_*.mjs
 
 .playwright-mcp/
 .pi/
+.codegraph/
