@@ -73,7 +73,7 @@ test("derives the filter from the same status inputs as the row badge", () => {
 
 test("surfaces per-run progress from the subagent-async snapshot while falling back to relation status", () => {
   // Live runs come in as an optional prop; without one the row keeps using
-  // relation.status, so older sessions and the demo still render.
+  // relation.status, so older sessions still render.
   assert.match(source, /liveRuns\?: PiSubagentSnapshotNode\[\]/);
   assert.match(source, /liveRuns = \[\]/);
   assert.match(source, /progress\?\.status \?\? relation\?\.status \?\? "completed"/);
