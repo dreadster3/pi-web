@@ -355,6 +355,9 @@ async function subagentsRoute(request: MockRequest): Promise<Response> {
     ];
     return json({ profile });
   }
+  // POST /api/subagents/runs pauses, stops or steers a detached run, which needs
+  // a real server: the demo has no runner to signal and no control inbox.
+  if (request.segments[2] === "runs") return error(demoOnlyMessage(), 501);
   if (request.segments[2] !== "profiles") return error("Not found", 404);
   if (request.method === "GET") return json(profilesState);
   const body = await request.json<{ scope?: string; name?: string; profile?: Record<string, unknown> & { name: string } }>();

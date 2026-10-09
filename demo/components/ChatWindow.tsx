@@ -61,6 +61,8 @@ interface Props {
   onSessionStatsChange?: (stats: SessionStatsInfo | null) => void;
   /** Live pi-subagents runs parsed from the `subagent-async` extension widget. */
   onSubagentRunsChange?: (runs: PiSubagentSnapshotNode[]) => void;
+  /** A pause/steer from this chat changed a run's own `status.json`; refetch the list. */
+  onSubagentRunControl?: () => void;
   onSessionStatsPanelOpen?: () => void;
   onContextUsageChange?: (usage: { percent: number | null; contextWindow: number; tokens: number | null } | null) => void;
   onOpenFile?: (filePath: string, page?: number) => void;
@@ -231,7 +233,7 @@ function ProcessDetailsGroup({ messageCount, toolCallCount, defaultExpanded = fa
   );
 }
 
-export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initialScrollPosition, onScrollPositionChange, sessionRunning, newSessionCwd, newSessionDraftKey, onAgentEnd, onAttentionNeeded, onSessionCreated, onSessionForked, modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSystemToolsChange, onSystemInfoLoaderChange, onSessionStatsChange, onSubagentRunsChange, onSessionStatsPanelOpen, onContextUsageChange, onOpenFile, onOpenSession, onAskInNewChat, quoteSelectionEnabled = false, initialPrompt, onInitialPromptConsumed, soundEnabled = true, onSoundToggle, playDoneSound = () => {}, unlockAudio }: Props) {
+export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initialScrollPosition, onScrollPositionChange, sessionRunning, newSessionCwd, newSessionDraftKey, onAgentEnd, onAttentionNeeded, onSessionCreated, onSessionForked, modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSystemToolsChange, onSystemInfoLoaderChange, onSessionStatsChange, onSubagentRunsChange, onSubagentRunControl, onSessionStatsPanelOpen, onContextUsageChange, onOpenFile, onOpenSession, onAskInNewChat, quoteSelectionEnabled = false, initialPrompt, onInitialPromptConsumed, soundEnabled = true, onSoundToggle, playDoneSound = () => {}, unlockAudio }: Props) {
   const { t } = useI18n();
   const isMobile = useIsMobile();
   const completionNotificationsEnabled = session?.relation?.kind !== "subagent";
@@ -282,12 +284,22 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
     handleBuiltinSlashCommand,
     handleToolPresetChange, handleThinkingLevelChange, handleSetDefaultModel, handleSetDefaultThinkingLevel, loadSlashCommands, scrollUserMsgToTop,
     loadContext, activeLeafId, scrollToBottom, scrollToMessage,
+    subagentRunPausable,
+    handleSubagentPause,
+    pendingSubagentSteers,
   } = useAgentSession({
     session, sessionRunning, newSessionCwd, newSessionDraftKey, onAgentEnd: wrappedOnAgentEnd, onAttentionNeeded, onSessionCreated, onSessionForked,
     modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSystemToolsChange, onSystemInfoLoaderChange, onSessionStatsPanelOpen,
     deferInitialScroll: Boolean(pendingScrollRestore),
+    onSubagentRunControl,
+    translate: t,
   });
   const sessionBusy = agentRunning || bashRunning;
+  // A child chat backed by a running run keeps Stop and Pause meaningful without a
+  // streaming session, so the affordances and the Esc shortcut cover both cases.
+  // Both state buttons are offered only while the run is `running`: the route's
+  // guards refuse a queued run, which stays Send-only.
+  const stopAffordance = sessionBusy || subagentRunPausable;
   const [quotedSelection, setQuotedSelection] = useState<{
     text: string;
     top: number;
@@ -449,8 +461,8 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
 
   // Register the abort handler for the global Esc shortcut
   useEffect(() => {
-    registerAbortHandler(sessionBusy ? handleAbort : null);
-  }, [sessionBusy, handleAbort]);
+    registerAbortHandler(stopAffordance ? handleAbort : null);
+  }, [stopAffordance, handleAbort]);
 
   // --- Lazy-load historical messages ---
   // Only render the last N messages initially. When the user scrolls to the
@@ -935,6 +947,8 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
       onFollowUp={agentRunning ? handleFollowUp : undefined}
       onPromptWithStreamingBehavior={agentRunning ? handlePromptWithStreamingBehavior : undefined}
       isStreaming={sessionBusy}
+      subagentRunPausable={subagentRunPausable}
+      onSubagentPause={subagentRunPausable ? handleSubagentPause : undefined}
       model={displayModelValue}
       isAutoModelSelection={isAutoModelSelection}
       modelNames={modelNames}
@@ -961,6 +975,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
       onSetDefaultThinkingLevel={session || isNew ? handleSetDefaultThinkingLevel : undefined}
       retryInfo={retryInfo}
       queuedMessages={queuedMessages}
+      pendingSteers={pendingSubagentSteers}
       inputHistory={inputHistory}
       onRecallQueue={handleRecallQueue}
       slashCommands={slashCommands}

@@ -27,6 +27,7 @@ export function mapPiSubagentRunState(state: PiSubagentRunState): PiSubagentRunS
       return "running";
     case "complete":
       return "completed";
+    case "paused":
     case "stopped":
       return "stopped";
     default:

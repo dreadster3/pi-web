@@ -50,6 +50,15 @@ interface Props {
   onFollowUp?: (message: string, images?: AttachedImage[]) => void;
   onPromptWithStreamingBehavior?: (message: string, behavior: "steer" | "followUp", images?: AttachedImage[]) => void;
   isStreaming: boolean;
+  /**
+   * A pi-subagents run backs this chat and is still running, so the composer
+   * shows the main-agent gesture row: Send reads Steer, and Stop (hard stop) sits
+   * beside Pause (resumable interrupt). The route refuses a queued run, so both
+   * state buttons are offered only while state is `running`.
+   */
+  subagentRunPausable?: boolean;
+  /** The softer state button beside Stop; only meaningful with `subagentRunPausable`. */
+  onSubagentPause?: () => void;
   /** Text-only composer without the session controls or outer spacing. */
   compact?: boolean;
   model?: { provider: string; modelId: string } | null;
@@ -84,6 +93,12 @@ interface Props {
   onSetDefaultThinkingLevel?: (level: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max") => void;
   retryInfo?: { attempt: number; maxAttempts: number; errorMessage?: string } | null;
   queuedMessages?: QueuedMessages | null;
+  /**
+   * Steers this child chat sent that the run has not confirmed yet: the same
+   * affordance as the main agent's queued row, cleared when the run's receipt
+   * says delivered (then the message is in the transcript) or refused.
+   */
+  pendingSteers?: { requestId: string; message: string }[];
   inputHistory?: string[];
   onRecallQueue?: () => void;
   slashCommands?: SlashCommandInfo[];
@@ -631,12 +646,12 @@ export function ModelScopeWarningBanner({ warnings }: { warnings?: string[] }) {
 }
 
 export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
-  onSend, onAbort, onSteer, onFollowUp, isStreaming, model, isAutoModelSelection, modelNames, modelList, modelError, modelScopeWarnings, onModelChange, modelSwitching,
+  onSend, onAbort, onSteer, onFollowUp, isStreaming, subagentRunPausable = false, onSubagentPause, model, isAutoModelSelection, modelNames, modelList, modelError, modelScopeWarnings, onModelChange, modelSwitching,
   defaultModel, onSetDefaultModel,
   onCompact, onAbortCompaction, isCompacting, compactError, compactResult, toolPreset, onToolPresetChange,
   thinkingLevel, isAutoThinkingSelection = false, onThinkingLevelChange, availableThinkingLevels, thinkingLevelMap,
   savedDefaultThinkingLevel, onSetDefaultThinkingLevel,
-  retryInfo, queuedMessages, inputHistory = [], onRecallQueue,
+  retryInfo, queuedMessages, pendingSteers, inputHistory = [], onRecallQueue,
   slashCommands, slashCommandsLoading, onLoadSlashCommands,
   onBuiltinCommand,
   soundEnabled, onSoundToggle, onAudioUnlock,
@@ -1460,7 +1475,9 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
       }
 
       // Esc stops the agent when no slash/@/history menu or IME composition is active.
-      if (e.key === "Escape" && !isComposing && isStreaming && onAbort) {
+      // A live subagent run has no streaming session of its own, so it takes the
+      // same shortcut: Stop hard-stops the run.
+      if (e.key === "Escape" && !isComposing && (isStreaming || subagentRunPausable) && onAbort) {
         e.preventDefault();
         onAbort();
         return;
@@ -1475,7 +1492,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
         }
       }
     },
-    [isMobile, enterSendMode, isStreaming, onSteer, onFollowUp, onAbort, slashMenuOpen, slashQuery, displayedSlashCommands, slashActiveIndex, applySlashCommand, sendQueued, handleSend, getNextSlashIndex, atMenuOpen, atQuery, atMatches, atActiveIndex, applyAtCompletion, historyMenuOpen, inputHistory, historyActiveIndex, applyHistoryInput, value]
+    [isMobile, enterSendMode, isStreaming, subagentRunPausable, onSteer, onFollowUp, onAbort, slashMenuOpen, slashQuery, displayedSlashCommands, slashActiveIndex, applySlashCommand, sendQueued, handleSend, getNextSlashIndex, atMenuOpen, atQuery, atMatches, atActiveIndex, applyAtCompletion, historyMenuOpen, inputHistory, historyActiveIndex, applyHistoryInput, value]
   );
 
   const handleInput = useCallback(() => {
@@ -1668,6 +1685,38 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
 
 
 
+  /**
+   * One gesture, two lanes: while a main-agent turn streams this steers its
+   * queued message, and on a live subagent run it steers the detached run behind
+   * this chat (the same thing Enter does, `handleSend` routing to the run).
+   */
+  const steerButton = (
+    <button
+      onClick={() => {
+        if (isStreaming) sendQueued("steer");
+        else void handleSend();
+      }}
+      disabled={!canQueueStreamingMessage}
+      title={t("chat.steerHint")}
+      style={{
+        display: "flex", alignItems: "center", gap: 5,
+        padding: "7px 12px",
+        background: canQueueStreamingMessage ? "rgba(234,179,8,0.12)" : "none",
+        border: "1px solid rgba(234,179,8,0.35)",
+        borderRadius: 8,
+        color: canQueueStreamingMessage ? "rgba(180,130,0,1)" : "var(--text-dim)",
+        cursor: canQueueStreamingMessage ? "pointer" : "not-allowed",
+        fontSize: 13, fontWeight: 600, letterSpacing: "-0.01em",
+        transition: "background 0.12s",
+      }}
+    >
+      <svg width="12" height="12" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M5 1 L9 5 L5 9" /><line x1="1" y1="5" x2="9" y2="5" />
+      </svg>
+      {t("chat.steer")}
+    </button>
+  );
+
   return (
     <fieldset
       disabled={builtinCommandPending}
@@ -1777,6 +1826,33 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
             ))}
             {queuedMessages?.followUp.map((text, i) => (
               <QueuedMessageRow key={`followup-${i}`} kind="follow-up" text={text} />
+            ))}
+          </div>
+        )}
+        {/* Steers awaiting the run's receipt (pi-subagents has not delivered them
+            to the child yet). The main-agent recall does not apply: the run owns
+            these, so there is no button — the row clears on the runner's answer. */}
+        {(pendingSteers?.length ?? 0) > 0 && (
+          <div style={{
+            marginBottom: 8,
+            border: "1px solid var(--border)",
+            borderRadius: 6,
+            background: "var(--bg-panel)",
+            padding: "5px 0",
+          }}>
+            <div style={{ padding: "2px 8px 4px 10px" }}>
+              <span style={{
+                fontSize: 10,
+                fontFamily: "var(--font-mono)",
+                color: "var(--text-dim)",
+                textTransform: "uppercase",
+                letterSpacing: 0.4,
+              }}>
+                {t("chat.queued", { count: pendingSteers?.length ?? 0 })}
+              </span>
+            </div>
+            {pendingSteers?.map((steer) => (
+              <QueuedMessageRow key={steer.requestId} kind="steer" text={steer.message} />
             ))}
           </div>
         )}
@@ -2276,29 +2352,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
 
           {isStreaming ? (
             <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0, alignSelf: "flex-end" }}>
-              {onSteer && (
-                <button
-                  onClick={() => sendQueued("steer")}
-                  disabled={!canQueueStreamingMessage}
-                  title={t("chat.steerHint")}
-                  style={{
-                    display: "flex", alignItems: "center", gap: 5,
-                    padding: "7px 12px",
-                    background: canQueueStreamingMessage ? "rgba(234,179,8,0.12)" : "none",
-                    border: "1px solid rgba(234,179,8,0.35)",
-                    borderRadius: 8,
-                    color: canQueueStreamingMessage ? "rgba(180,130,0,1)" : "var(--text-dim)",
-                    cursor: canQueueStreamingMessage ? "pointer" : "not-allowed",
-                    fontSize: 13, fontWeight: 600, letterSpacing: "-0.01em",
-                    transition: "background 0.12s",
-                  }}
-                >
-                  <svg width="12" height="12" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M5 1 L9 5 L5 9" /><line x1="1" y1="5" x2="9" y2="5" />
-                  </svg>
-                  {t("chat.steer")}
-                </button>
-              )}
+              {onSteer && steerButton}
               {onFollowUp && (
                 <button
                   onClick={() => sendQueued("followup")}
@@ -2324,6 +2378,13 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                   {t("chat.followUp")}
                 </button>
               )}
+            </div>
+          ) : subagentRunPausable ? (
+            // A live run keeps the main-agent gesture row in this slot: Steer here,
+            // with Stop and Pause beside it below. Send (Enter) routes to the run
+            // the same way, so the two gestures never disagree.
+            <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0, alignSelf: "flex-end" }}>
+              {steerButton}
             </div>
           ) : (
             <button
@@ -2715,10 +2776,11 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
               </div>
             )}
 
-            {isStreaming && (
+            {(isStreaming || subagentRunPausable) && (
+              <>
               <button
                 onClick={onAbort}
-                 title={t("chat.stopAgent")}
+                 title={isStreaming ? t("chat.stopAgent") : t("chat.subagent.stopTitle")}
                 style={{
                   display: "flex", alignItems: "center", gap: 6,
                   padding: "8px 14px",
@@ -2740,6 +2802,34 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                 </svg>
                  {t("chat.stop")}
               </button>
+              {!isStreaming && onSubagentPause && (
+                <button
+                  onClick={onSubagentPause}
+                   title={t("chat.subagent.pauseTitle")}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 6,
+                    padding: "8px 14px",
+                    height: 32,
+                    background: "rgba(234,179,8,0.08)",
+                    border: "1px solid rgba(234,179,8,0.35)",
+                    borderRadius: 9,
+                    color: "rgba(180,130,0,1)",
+                    cursor: "pointer",
+                    fontSize: 12, fontWeight: 600,
+                    whiteSpace: "nowrap", letterSpacing: "-0.01em",
+                    transition: "background 0.12s",
+                  }}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(234,179,8,0.16)"; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = "rgba(234,179,8,0.08)"; }}
+                >
+                  <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
+                    <rect x="1" y="1.5" width="3" height="7" rx="1" fill="currentColor" />
+                    <rect x="6" y="1.5" width="3" height="7" rx="1" fill="currentColor" />
+                  </svg>
+                   {t("chat.subagent.pause")}
+                </button>
+              )}
+              </>
             )}
 
             {onSoundToggle !== undefined && (

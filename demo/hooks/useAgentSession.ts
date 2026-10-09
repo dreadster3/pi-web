@@ -31,6 +31,18 @@ import { isSystemMessageEvent } from "@/lib/agent-event-wire";
 import { getToolExecutionProgress } from "@/lib/tool-execution-progress";
 import { updateExtensionWidgets } from "@/lib/extension-widgets";
 import {
+  fetchPiSubagentRunStatus,
+  piSubagentRunControlNotice,
+  piSubagentRunPausable,
+  piSubagentRunSteerable,
+  piSubagentSteerDelivery,
+  sendPiSubagentRunControl,
+  type PiSubagentPendingSteer,
+  type PiSubagentRunControlResponse,
+  type PiSubagentRunStatus,
+} from "@/lib/pi-subagents-run-control";
+import type { PiSubagentRunState } from "@/lib/pi-subagents-snapshot";
+import {
   CHAT_SCROLL_REATTACH_TOLERANCE,
   CHAT_SCROLL_TAIL_TOLERANCE,
   getLiveFollowAttached,
@@ -174,6 +186,10 @@ export interface UseAgentSessionOptions {
   onSessionStatsPanelOpen?: () => void;
   setToolPreset?: (preset: ToolPreset) => void;
   deferInitialScroll?: boolean;
+  /** A pause/steer changed the run's own `status.json`; the list the gate is built from must refetch. */
+  onSubagentRunControl?: () => void;
+  /** Translator for the control notices this hook raises. */
+  translate?: (key: string, params?: Record<string, string | number>) => string;
 }
 
 export type ThinkingLevelOption = "auto" | "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
@@ -199,6 +215,9 @@ const EVENT_STREAM_RECONNECT_DELAY_MS = 1_000;
 const SESSION_LEASE_RENEW_INTERVAL_MS = 30_000;
 // Retry temporary model-list failures without requiring a page refresh.
 const MODELS_RETRY_DELAYS_MS = [2_000, 5_000, 10_000];
+// One run's `status.json` is small and cheap to re-read; the child chat keeps the
+// composer gate honest with the same cadence ChatWindow uses for the widget poll.
+const SUBAGENT_RUN_POLL_MS = 4_000;
 const MAX_NOTICES = 5;
 const NOTICE_VISIBLE_MS = 5000;
 const NOTICE_EXIT_ANIMATION_MS = 180;
@@ -305,6 +324,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const {
     session, newSessionCwd, newSessionDraftKey, onAgentEnd, onAttentionNeeded, onSessionCreated, onSessionForked,
     modelsRefreshKey, onBranchDataChange, onSystemPromptChange, onSystemToolsChange, onSystemInfoLoaderChange, onSessionStatsPanelOpen,
+    onSubagentRunControl, translate,
   } = opts;
 
   const isNew = session === null && newSessionCwd !== null;
@@ -513,6 +533,126 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       restoreDraftSubmission(destinationDraftKey, text, draftImages);
     }
   }, [newSessionDraftKey, opts.chatInputRef, resolveComposerDraftKey]);
+
+  // ── pi-subagents run control (docs/adr/0007-subagents-control-bridging.md) ──
+  // A child transcript opened in this chat is backed by a detached pi-subagents
+  // run, and the package scopes its `subagent-async` widget to the launching
+  // session, so this chat has no live source of its own. The relation's run id is
+  // the handle; the read-only GET is polled while the document is visible and the
+  // sidebar's `relation.status` seeds the first paint until the first answer lands.
+  const controlledRunId = session?.relation?.kind === "subagent" ? session.relation.runId : undefined;
+  const controlledStepIndex = session?.relation?.kind === "subagent" ? session.relation.stepIndex : undefined;
+  const [runState, setRunState] = useState<{ runId: string; state: PiSubagentRunState | null } | null>(null);
+  // The run's own steer receipts from the last poll, kept apart from `runState`:
+  // the gate only needs the observed state, while clearing a queued steer row
+  // needs the receipts and must re-run when they change.
+  const [steerReceipts, setSteerReceipts] = useState<PiSubagentRunStatus["steering"]>(undefined);
+  // The sidebar row's own status, until a poll answers for this run.
+  const seededRunState = session?.relation?.kind === "subagent"
+    ? (session.relation.status === "running" ? "running" as const : undefined)
+    : undefined;
+  // A `state: null` record is a run the poll found gone or unaddressable: it wins
+  // over the seed so the gate clears instead of falling back to a stale "running".
+  const observedRunState: PiSubagentRunState | undefined = runState && runState.runId === controlledRunId
+    ? (runState.state ?? undefined)
+    : seededRunState;
+
+  // Steers this chat sent that the run has not confirmed yet. Ephemeral client
+  // state (no persistence): a steer's only durable trace is the run's own
+  // `steering.recent[]`, which the poll below reads back to clear the row.
+  const [pendingSteers, setPendingSteers] = useState<PiSubagentPendingSteer[]>([]);
+  const dropPendingSteer = useCallback((requestId: string) => {
+    setPendingSteers((prev) => prev.filter((steer) => steer.requestId !== requestId));
+  }, []);
+  const addPendingSteer = useCallback((steer: PiSubagentPendingSteer) => {
+    setPendingSteers((prev) => [...prev.filter((existing) => existing.requestId !== steer.requestId), steer]);
+  }, []);
+
+  useEffect(() => {
+    if (!controlledRunId) return;
+    let stopped = false;
+    let controller: AbortController | null = null;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    // A hidden tab has nothing to gate; the visibilitychange nudge re-reads once
+    // the tab is visible again, the convention the sidebar's poll uses too.
+    const schedule = () => {
+      if (timer) clearTimeout(timer);
+      if (stopped || document.visibilityState !== "visible") return;
+      timer = setTimeout(() => void poll(), SUBAGENT_RUN_POLL_MS);
+    };
+    const poll = async () => {
+      if (stopped || document.visibilityState !== "visible") return;
+      controller?.abort();
+      const current = new AbortController();
+      controller = current;
+      try {
+        const result = await fetchPiSubagentRunStatus(controlledRunId, current.signal);
+        if (stopped || controller !== current) return;
+        if (result.ok) {
+          setRunState({ runId: controlledRunId, state: result.data.state });
+          setSteerReceipts(result.data.steering);
+        } else if (result.status === 404 || result.status === 400) {
+          // A run that is gone or unaddressable will not come back at the same
+          // id, so stop the poll and clear the gate: the composer falls back to a
+          // plain prompt against the finished transcript.
+          setRunState({ runId: controlledRunId, state: null });
+          stopped = true;
+        }
+        // A 5xx is transient: keep the last known state and retry on the next poll.
+      } catch {
+        // Keep the last known state; the next visible-tab poll retries.
+      } finally {
+        if (controller === current) controller = null;
+        schedule();
+      }
+    };
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        void poll();
+        return;
+      }
+      if (timer) clearTimeout(timer);
+      timer = null;
+      controller?.abort();
+      controller = null;
+    };
+    void poll();
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      stopped = true;
+      if (timer) clearTimeout(timer);
+      controller?.abort();
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [controlledRunId]);
+
+  /**
+   * One control action against the run behind this chat. A refusal is a notice,
+   * exactly like a rejected main-chat prompt; on success the caller refetches the
+   * list the gate reads, because the action changed the run's own `status.json`.
+   */
+  const sendRunControl = useCallback(async (
+    action: "pause" | "steer" | "stop",
+    options: { message?: string; targetIndex?: number } = {},
+  ): Promise<PiSubagentRunControlResponse> => {
+    if (!controlledRunId) throw new Error("This chat has no pi-subagents run to control");
+    const result = await sendPiSubagentRunControl(controlledRunId, action, options);
+    if (result.ok) {
+      // A delivered interrupt that landed is the one state change we observed
+      // ourselves; everything else is left to the next poll or list read.
+      if (action === "pause" && result.data.transitioned) {
+        setRunState({ runId: controlledRunId, state: "paused" });
+      }
+      // A stop is a terminal transition the request observed itself, so the gate
+      // closes without waiting for the poll. The reported state is the one the
+      // route saw: a legacy-layout fallback reports `paused`, never a claimed stop.
+      if (action === "stop" && result.data.transitioned && result.data.state) {
+        setRunState({ runId: controlledRunId, state: result.data.state });
+      }
+      onSubagentRunControl?.();
+    }
+    return result;
+  }, [controlledRunId, onSubagentRunControl]);
 
   // Editing a past message only prefills the composer; the branch moves when it is sent,
   // so cancelling or reloading never hides the rest of the conversation.
@@ -1552,6 +1692,55 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const handleSend = useCallback(async (message: string, images?: AttachedImage[]) => {
     const trimmedMessage = message.trim();
     if (!trimmedMessage && !images?.length) return;
+    const isSlashCommandPrompt = !images?.length && trimmedMessage.startsWith("/");
+    const isBashCommand = !images?.length && trimmedMessage.startsWith("!");
+    const steering = Boolean(controlledRunId) && piSubagentRunSteerable(observedRunState);
+    // Local gestures stay local: `!cmd` runs in this chat's own shell arm below,
+    // and a `/command` the composer did not handle has no expansion inside a
+    // steer, so it is refused rather than injected as literal text. Both dispatch
+    // before the steer branch, the way they do in every other transcript.
+    if (steering && isSlashCommandPrompt) {
+      restoreSubmission(message, images, composerDraftKey);
+      addNotice({ type: "error", message: translate?.("chat.subagent.commandOnly") ?? "chat.subagent.commandOnly" });
+      return;
+    }
+    // A child transcript's chat steers the run that backs it instead of prompting
+    // the child's own (idle) wrapper: one message, the same gesture as the main
+    // chat, and the run decides whether it lands as a live steer or a resume. The
+    // route refuses a terminal run, which is when a plain prompt is right again.
+    if (steering && !isBashCommand) {
+      // A steer carries text only, so any attachment is refused here rather than
+      // dropped: the notice says why and the whole submission returns to the
+      // composer, attached files included.
+      if (images?.length) {
+        restoreSubmission(message, images, composerDraftKey);
+        addNotice({ type: "error", message: translate?.("chat.subagent.textOnly") ?? "chat.subagent.textOnly" });
+        return;
+      }
+      try {
+        const result = await sendRunControl("steer", {
+          message,
+          ...(controlledStepIndex !== undefined ? { targetIndex: controlledStepIndex } : {}),
+        });
+        if (!result.ok) {
+          addNotice({ type: "error", message: result.failure.error });
+          restoreSubmission(message, images, composerDraftKey);
+          return;
+        }
+        // The runner accepted a request it has not delivered yet: keep it on
+        // screen as a queued row until the poll reads its receipt back.
+        const requestId = result.data.requestId;
+        if (controlledRunId && result.data.delivery === "control-inbox" && result.data.steeringState === "queued" && requestId) {
+          addPendingSteer({ runId: controlledRunId, requestId, message });
+        }
+        if (translate) addNotice(piSubagentRunControlNotice(result.data, translate));
+      } catch (error) {
+        console.error("Failed to steer the subagent run:", error);
+        addNotice({ type: "error", message: error instanceof Error ? error.message : String(error) });
+        restoreSubmission(message, images, composerDraftKey);
+      }
+      return;
+    }
     if (agentRunningRef.current || bashRunningRef.current) {
       restoreSubmission(message, images, composerDraftKey);
       return;
@@ -1567,9 +1756,6 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         return;
       }
     }
-    const isSlashCommandPrompt = !images?.length && trimmedMessage.startsWith("/");
-
-    const isBashCommand = !images?.length && trimmedMessage.startsWith("!");
     if (isBashCommand) {
       const isExcluded = trimmedMessage.startsWith("!!");
       const bashCmd = (isExcluded ? trimmedMessage.slice(2) : trimmedMessage.slice(1)).trim();
@@ -1677,7 +1863,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       setAgentPhase(null);
       dispatch({ type: "end" });
     }
-  }, [isNew, newSessionCwd, newSessionModel, session, ensureNewSession, ensureEventsConnected, promoteNewSession, waitForPromptSettlement, addNotice, cancelEventStreamGrace, closeEvents, composerDraftKey, reconcileAgentState, restoreSubmission, editEntryId, setEdit]);
+  }, [isNew, newSessionCwd, newSessionModel, session, ensureNewSession, ensureEventsConnected, promoteNewSession, waitForPromptSettlement, addNotice, cancelEventStreamGrace, closeEvents, composerDraftKey, reconcileAgentState, restoreSubmission, editEntryId, setEdit, controlledRunId, controlledStepIndex, observedRunState, sendRunControl, translate, addPendingSteer]);
 
   const executeBash = useCallback(async (command: string, excludeFromContext: boolean) => {
     if (agentRunningRef.current || bashRunningRef.current) return;
@@ -1708,6 +1894,21 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   executeBashRef.current = executeBash;
 
   const handleAbort = useCallback(async () => {
+    // Stop on a child chat hard-stops the run behind it: the composer's Stop is
+    // the same affordance as the main chat's, but a UI Stop must end the run, not
+    // park it as a resumable pause (the Pause button is that gesture). The child
+    // wrapper itself is idle and has nothing to abort.
+    if (controlledRunId && piSubagentRunPausable(observedRunState)) {
+      try {
+        const result = await sendRunControl("stop");
+        if (!result.ok) addNotice({ type: "error", message: result.failure.error });
+        else if (translate) addNotice(piSubagentRunControlNotice(result.data, translate));
+      } catch (error) {
+        console.error("Failed to stop the subagent run:", error);
+        addNotice({ type: "error", message: error instanceof Error ? error.message : String(error) });
+      }
+      return;
+    }
     const sid = sessionIdRef.current;
     if (!sid) return;
     if (bashRunningRef.current) {
@@ -1723,7 +1924,43 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     } catch (e) {
       console.error("Failed to abort:", e);
     }
-  }, []);
+  }, [addNotice, controlledRunId, observedRunState, sendRunControl, translate]);
+
+  // The softer gesture beside Stop: an interrupt that pauses the run and leaves
+  // it resumable, which the composer's next send turns into a parent-mediated
+  // resume (docs/adr/0007).
+  const handleSubagentPause = useCallback(async () => {
+    try {
+      const result = await sendRunControl("pause");
+      if (!result.ok) addNotice({ type: "error", message: result.failure.error });
+      else if (translate) addNotice(piSubagentRunControlNotice(result.data, translate));
+    } catch (error) {
+      console.error("Failed to pause the subagent run:", error);
+      addNotice({ type: "error", message: error instanceof Error ? error.message : String(error) });
+    }
+  }, [addNotice, sendRunControl, translate]);
+
+  /**
+   * The run's receipt is the only durable trace a steer leaves, so each poll's
+   * `steering.recent[]` reconciles the queued rows: `delivered` (also the
+   * package's recovered/late) clears the row and re-reads the transcript that now
+   * holds the message, `failed` clears it with the same error notice a refused
+   * send gets, and no receipt yet keeps it on screen.
+   */
+  useEffect(() => {
+    if (!steerReceipts || pendingSteers.length === 0) return;
+    const status = { steering: steerReceipts };
+    for (const steer of pendingSteers) {
+      const delivery = piSubagentSteerDelivery(status, steer.requestId);
+      if (delivery === "queued") continue;
+      dropPendingSteer(steer.requestId);
+      if (delivery === "delivered") {
+        if (session?.id) void loadSession(session.id);
+      } else if (translate) {
+        addNotice({ type: "error", message: translate("chat.subagent.steerFailed") });
+      }
+    }
+  }, [steerReceipts, pendingSteers, session?.id, loadSession, dropPendingSteer, addNotice, translate]);
 
   const handleFork = useCallback(async (entryId: string) => {
     if (bashRunningRef.current) return;
@@ -2556,6 +2793,13 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     handleSend, handleAbort, handleFork, handleNavigate, handleModelChange,
     handleCompact, handleSteer, handleFollowUp, handlePromptWithStreamingBehavior, handleAbortCompaction,
     handleRecallQueue,
+    // Subagent run control; only set while a pi-subagents child transcript is open.
+    subagentRunControlled: Boolean(controlledRunId),
+    subagentRunSteerable: Boolean(controlledRunId) && piSubagentRunSteerable(observedRunState),
+    subagentRunPausable: Boolean(controlledRunId) && piSubagentRunPausable(observedRunState),
+    handleSubagentPause,
+    // Ephemeral by design: a queued steer row lives only in this mount.
+    pendingSubagentSteers: controlledRunId ? pendingSteers : [],
     handleBuiltinSlashCommand,
     handleEditContent,
     // Present only while a history edit is pending.
