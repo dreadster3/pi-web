@@ -426,6 +426,11 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const eventStreamGraceActiveRef = useRef(false);
   const sessionIdRef = useRef<string | null>(session?.id ?? null);
   const sessionPropIdRef = useRef<string | null>(session?.id ?? null);
+  // A pi-subagents child tail has no live source of its own: a detached runner
+  // appends its events to disk, so an SSE connection here would only restart the
+  // child's extensions on every wrapper rebuild and replay their session-start
+  // notices. shouldMaintain() reads this to refuse that reconnect.
+  const subagentChildRef = useRef(false);
   // False while the session carries no tool selection of its own, so its loadout
   // follows settings.json defaultTools and the picker must say so rather than
   // labelling it with whichever preset the resolved tools happen to match.
@@ -480,6 +485,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const hasEarlierMessagesRef = useRef(false);
 
   sessionPropIdRef.current = session?.id ?? null;
+  subagentChildRef.current = session?.relation?.kind === "subagent";
   dataRef.current = data;
   messagesRef.current = messages;
   entryIdsRef.current = entryIds;
@@ -497,7 +503,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         && (
           agentRunningRef.current
           || eventStreamGraceActiveRef.current
-          || sessionPropIdRef.current === sid
+          || (sessionPropIdRef.current === sid && !subagentChildRef.current)
         )
       ),
       readinessTimeoutMs: EVENT_STREAM_READY_TIMEOUT_MS,
@@ -647,9 +653,9 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           setRunState({ runId: controlledRunId, state: result.data.state });
           setSteerReceipts(result.data.steering);
           // The detached runner appends to the child's `.jsonl` from another
-          // process, so this chat's own wrapper — the one its SSE keeps alive —
-          // never indexes the run's progress: only a forced read, which drops an
-          // idle wrapper the file has moved past, sees it. Every poll cycle whose
+          // process, so this chat's own wrapper never indexes the run's progress:
+          // only a forced read, which drops an idle wrapper the file has moved
+          // past, sees it. Every poll cycle whose
           // observed state is still live therefore forces the load the mount and
           // the SSE settlement use, so entry ids, the tree and branch navigation
           // settle exactly as for any other refresh; a forced read already in the
