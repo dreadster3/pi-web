@@ -404,6 +404,31 @@ test("delegates event stream readiness and hides an empty agent phase", () => {
   assert.match(phaseLabelSource, /return null;/);
 });
 
+test("a subagent child tail keeps no event stream, so a wrapper rebuild cannot replay its notices", () => {
+  // A child transcript's live tail is refreshed by the run poll's forced disk
+  // read, never by SSE events: it has no live source of its own. Maintaining an
+  // SSE here would recreate the child's AgentSession on every wrapper rebuild,
+  // and its extensions would notify again on each session_start — the 4s toast
+  // loop. shouldMaintain() therefore refuses the stream while the chat is only
+  // viewing the child, so the rebuild branch below is a no-op for it.
+  const maintainSource = source.slice(
+    source.indexOf("shouldMaintain: (sid)"),
+    source.indexOf("readinessTimeoutMs: EVENT_STREAM_READY_TIMEOUT_MS"),
+  );
+  assert.match(source, /subagentChildRef\.current = session\?\.relation\?\.kind === "subagent"/);
+  assert.match(maintainSource, /sessionPropIdRef\.current === sid && !subagentChildRef\.current/);
+  // A run started from this chat (or its settle grace) still demands the stream,
+  // so a child the user actually prompts keeps receiving its own events.
+  assert.match(maintainSource, /agentRunningRef\.current\s*\n\s*\|\| eventStreamGraceActiveRef\.current/);
+
+  // Every other session keeps the reconnect the rebuild branch has always done.
+  const loadSessionSource = source.slice(
+    source.indexOf("  const loadSession = useCallback"),
+    source.indexOf("  const loadContext = useCallback"),
+  );
+  assert.match(loadSessionSource, /d\.wrapperRebuilt[\s\S]*?eventConnectionRef\.current\?\.close\(\)[\s\S]*?maintain\(sid\)/);
+});
+
 test("uses one absolute agent-readiness deadline instead of a five-second transport deadline", () => {
   assert.match(source, /EVENT_STREAM_READY_TIMEOUT_MS = 60_000/);
   assert.doesNotMatch(source, /EVENT_STREAM_OPEN_TIMEOUT_MS/);
