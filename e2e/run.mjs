@@ -456,12 +456,34 @@ try {
       const readingOffset = (target) => target.evaluate((element) => (
         element.getBoundingClientRect().top - element.closest(".overflow-y-auto").getBoundingClientRect().top
       ));
+      // The chat settles its own scroll asynchronously: the first render scrolls
+      // to the latest message, a prepended page re-anchors, and returning to a
+      // session replays a saved position. A reading offset only means something
+      // once no context page is in flight and the offset stopped changing;
+      // otherwise it is measured mid-jump and matches nothing after the trip.
+      let contextRequests = 0;
+      page.on("request", (request) => { if (new URL(request.url()).pathname.endsWith("/context")) contextRequests += 1; });
+      for (const event of ["requestfinished", "requestfailed"]) {
+        page.on(event, (request) => {
+          if (new URL(request.url()).pathname.endsWith("/context")) contextRequests = Math.max(0, contextRequests - 1);
+        });
+      }
+      const settledReadingOffset = async (target) => {
+        let previous = await readingOffset(target);
+        for (let attempt = 0; attempt < 60; attempt++) {
+          await page.waitForTimeout(50);
+          const current = await readingOffset(target);
+          if (contextRequests === 0 && current === previous) return current;
+          previous = current;
+        }
+        return previous;
+      };
       const positionForReading = async (target) => {
         await target.evaluate((element) => {
           const scroll = element.closest(".overflow-y-auto");
           scroll.scrollTop += element.getBoundingClientRect().top - scroll.getBoundingClientRect().top - 120;
         });
-        return readingOffset(target);
+        return settledReadingOffset(target);
       };
       await selectSession(text(0), "e4999");
       const olderPage = page.waitForResponse((response) => response.url().includes(`/api/sessions/${LONG}/context?`));
@@ -475,10 +497,10 @@ try {
       const answerHeading = page.getByRole("heading", { name: "E2E reading position", exact: true });
       const answerOffset = await positionForReading(answerHeading);
       await selectSession(text(0), "e4920");
-      assert.ok(Math.abs(await readingOffset(olderMessage) - olderOffset) < 5, "Returning to older history must restore its reading offset");
+      assert.ok(Math.abs(await settledReadingOffset(olderMessage) - olderOffset) < 5, "Returning to older history must restore its reading offset");
       await selectSession("Render **E2E markdown**", "user");
       assert.equal(await process.getAttribute("aria-expanded"), "false");
-      assert.ok(Math.abs(await readingOffset(answerHeading) - answerOffset) < 5, "Collapsing process details on remount must not displace the answer");
+      assert.ok(Math.abs(await settledReadingOffset(answerHeading) - answerOffset) < 5, "Collapsing process details on remount must not displace the answer");
 
       // Hold pagination until a different branch has loaded, exercising effect cancellation.
       let releaseHistory;
@@ -518,11 +540,17 @@ try {
       await page.locator(".markdown-code-block pre").waitFor();
       await checkChatAppearance(page);
       await page.setViewportSize(viewport);
-      // Returning from the mobile breakpoint restores the desktop sidebar preference in an effect, so wait for the toggle to settle.
+      // Leaving the mobile breakpoint restores the desktop sidebar preference in
+      // an effect. The toggle can flip between deciding and clicking, and that
+      // click then closes the sidebar the effect just opened, which no wait can
+      // undo. Re-read the toggle and click until the sidebar is actually open;
+      // the final wait still fails if it never opens.
       const hideSidebar = page.getByRole("button", { name: "Hide sidebar", exact: true });
       const showSidebar = page.getByRole("button", { name: "Show sidebar", exact: true });
       await hideSidebar.or(showSidebar).waitFor({ state: "visible" });
-      if (await showSidebar.isVisible()) await showSidebar.click();
+      for (let attempt = 0; attempt < 10 && !(await hideSidebar.isVisible()); attempt++) {
+        if (await showSidebar.isVisible()) await showSidebar.click({ timeout: 2000 }).catch(() => {});
+      }
       await hideSidebar.waitFor({ state: "visible" });
       await checkModelDiscovery(page);
     }

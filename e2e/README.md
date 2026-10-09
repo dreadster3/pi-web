@@ -9,9 +9,29 @@ npx playwright install chromium
 npm run test:e2e
 ```
 
+`npm ci` installs devDependencies, which this suite needs (`playwright`,
+`mammoth`, `react-markdown`, tailwind). A shell that exports
+`NODE_ENV=production` makes npm omit them, and the dev server then fails to
+compile the page. Run `env -u NODE_ENV npm ci` (or `npm ci --include=dev`) in
+that case.
+
+Playwright launches the Chromium revision pinned by `package-lock.json`;
+`npx playwright install chromium` fetches it and is enough on hosts with a
+normal C library set. On an immutable host such as NixOS the downloaded Chromium
+cannot load `libglib-2.0.so.0` and friends. nixpkgs packages the same revision
+with patched libraries, so point Playwright at it instead:
+
+```sh
+PLAYWRIGHT_BROWSERS_PATH=$(nix build --no-link --print-out-paths nixpkgs#playwright-driver.browsers) \
+  npm run test:e2e
+```
+
 The script starts and stops its own Turbopack dev server on an available
-loopback port. Run it in a checkout without an active dev server; Next.js
-shares `.next/dev/lock` within a checkout. All fixtures are created before
+loopback port, so it needs no `PLAYWRIGHT_BROWSERS_PATH` when the download
+works. Run it in a checkout without an active dev server; Next.js
+shares `.next/dev/lock` within a checkout and the failure message names the
+lock's process and port. Delete `.next/dev/lock` if that process is gone (a
+crashed server can leave it behind). All fixtures are created before
 startup in a temporary `PI_CODING_AGENT_DIR` and removed on completion.
 No model credentials or existing Pi sessions are needed.
 
