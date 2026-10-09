@@ -752,6 +752,8 @@ button.extension-widget-trigger:focus-visible {
 
 :root {
   --font-mono: var(--font-noto-mono), 'JetBrains Mono', 'Fira Code', 'Consolas', ui-monospace, 'PingFang SC', 'Microsoft YaHei', monospace;
+  /* The mirrored MermaidBlock's code weight (lib/app/globals.css defines it; the demo has no font settings). */
+  --font-mono-weight: 400;
 }
 
 pre, code {

@@ -75,3 +75,4 @@ export function projectDeleteCounts(
     directories: new Set(projectSessions.map((session) => session.cwd).filter(Boolean)).size,
   };
 }
+
