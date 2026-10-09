@@ -595,20 +595,19 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         if (result.ok) {
           setRunState({ runId: controlledRunId, state: result.data.state });
           setSteerReceipts(result.data.steering);
-          // The detached runner writes the child's `.jsonl` directly, so this
-          // chat's SSE (its own idle wrapper) never sees the run's progress: a
-          // live run's transcript advances only by re-reading it. Every poll
-          // cycle therefore re-reads through the same single-flighted load the
-          // SSE settlement uses, so entry ids and tree state stay consistent
-          // with reconciliation and branch navigation: a same-session read in
-          // the air absorbs the call, and one already forcing a fresh read (the
-          // mount's own) is at least as fresh as this cycle's. A terminal or
-          // unknown run leaves the transcript where it is.
+          // The detached runner appends to the child's `.jsonl` from another
+          // process, so this chat's own wrapper — the one its SSE keeps alive —
+          // never indexes the run's progress: only a forced read, which drops an
+          // idle wrapper the file has moved past, sees it. Every poll cycle whose
+          // observed state is still live therefore forces the load the mount and
+          // the SSE settlement use, so entry ids, the tree and branch navigation
+          // settle exactly as for any other refresh; a forced read already in the
+          // air (this cycle's or the mount's) is shared, never duplicated. A
+          // terminal or unknown run leaves the transcript where it is.
           if (piSubagentRunLive(result.data.state)) {
             const sid = sessionIdRef.current;
-            const flights = loadFlightsRef.current;
-            if (sid && !flights.has(sid) && !flights.has(`force:${sid}`)) {
-              void loadSessionRef.current?.(sid);
+            if (sid && !loadFlightsRef.current.has(`force:${sid}`)) {
+              void loadSessionRef.current?.(sid, false, false, { force: true });
             }
           }
         } else if (result.status === 404 || result.status === 400) {

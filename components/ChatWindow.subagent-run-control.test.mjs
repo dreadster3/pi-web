@@ -33,20 +33,20 @@ test("a live run's poll re-reads the child transcript, a terminal one does not",
     controlSource.indexOf("const poll = async () =>"),
     controlSource.indexOf("const onVisibilityChange"),
   );
-  // The detached runner writes the child's `.jsonl` itself and this chat's own
-  // SSE reflects its idle wrapper, so a live run's transcript only advances by
-  // re-reading it — inside the successful read, on the run's own state.
+  // The detached runner appends to the child's `.jsonl` from another process
+  // while this chat's own wrapper stays alive, so only a forced read reaches that
+  // progress — inside the successful read, on the run's own state.
   assert.match(
     pollSource,
-    /setSteerReceipts\(result\.data\.steering\)[\s\S]*?if \(piSubagentRunLive\(result\.data\.state\)\) \{[\s\S]*?loadSessionRef\.current\?\.\(sid\)/,
+    /setSteerReceipts\(result\.data\.steering\)[\s\S]*?if \(piSubagentRunLive\(result\.data\.state\)\) \{[\s\S]*?loadSessionRef\.current\?\.\(sid, false, false, \{ force: true \}\)/,
   );
-  // It re-reads the open child, never some other id, and only when no read for
-  // that session is already in the air — a plain flight absorbs the call, and a
-  // forced one (the mount's own) is already fresh, so one cycle can never start
-  // a second fetch of the same transcript.
+  // It re-reads the open child, never some other id, and only when no forced read
+  // for that session is already in the air: the mount's own read and this poll's
+  // share one fresh request, so one cycle can never start a second fetch of the
+  // same transcript.
   assert.match(
     pollSource,
-    /const sid = sessionIdRef\.current;\s*\n\s*const flights = loadFlightsRef\.current;\s*\n\s*if \(sid && !flights\.has\(sid\) && !flights\.has\(`force:\$\{sid\}`\)\) \{\s*\n\s*void loadSessionRef\.current\?\.\(sid\)/,
+    /const sid = sessionIdRef\.current;\s*\n\s*if \(sid && !loadFlightsRef\.current\.has\(`force:\$\{sid\}`\)\) \{\s*\n\s*void loadSessionRef\.current\?\.\(sid, false, false, \{ force: true \}\)/,
   );
   // A run that is unknown, gone or terminal leaves the transcript alone: only
   // the 404/400 arm touches the gate, and nothing outside `result.ok` reloads.
