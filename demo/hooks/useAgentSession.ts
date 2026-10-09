@@ -35,6 +35,7 @@ import {
   piSubagentRunControlNotice,
   piSubagentRunPausable,
   piSubagentRunSteerable,
+  piSubagentRunLive,
   piSubagentSteerDelivery,
   sendPiSubagentRunControl,
   type PiSubagentPendingSteer,
@@ -406,6 +407,9 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const liveFollowFrameRef = useRef<number | null>(null);
   const executeBashRef = useRef<(command: string, excludeFromContext: boolean) => Promise<void> | undefined>(undefined);
   const handleNavigateRef = useRef<((entryId: string) => Promise<boolean>) | undefined>(undefined);
+  // The run poll below runs before loadSession is defined; it re-reads a live
+  // child transcript through this late-assigned ref, like executeBashRef.
+  const loadSessionRef = useRef<((sid: string, showLoading?: boolean, includeState?: boolean, options?: { force?: boolean }) => Promise<unknown>) | undefined>(undefined);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const ensuringNewSessionRef = useRef<Promise<string | null> | null>(null);
   const newSessionPromotedRef = useRef(false);
@@ -591,6 +595,21 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         if (result.ok) {
           setRunState({ runId: controlledRunId, state: result.data.state });
           setSteerReceipts(result.data.steering);
+          // The detached runner appends to the child's `.jsonl` from another
+          // process, so this chat's own wrapper — the one its SSE keeps alive —
+          // never indexes the run's progress: only a forced read, which drops an
+          // idle wrapper the file has moved past, sees it. Every poll cycle whose
+          // observed state is still live therefore forces the load the mount and
+          // the SSE settlement use, so entry ids, the tree and branch navigation
+          // settle exactly as for any other refresh; a forced read already in the
+          // air (this cycle's or the mount's) is shared, never duplicated. A
+          // terminal or unknown run leaves the transcript where it is.
+          if (piSubagentRunLive(result.data.state)) {
+            const sid = sessionIdRef.current;
+            if (sid && !loadFlightsRef.current.has(`force:${sid}`)) {
+              void loadSessionRef.current?.(sid, false, false, { force: true });
+            }
+          }
         } else if (result.status === 404 || result.status === 400) {
           // A run that is gone or unaddressable will not come back at the same
           // id, so stop the poll and clear the gate: the composer falls back to a
@@ -695,9 +714,11 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
 
   const loadSession = useCallback(async (sid: string, showLoading = false, includeState = false, options?: { force?: boolean }) => {
     // Single-flight: concurrent reads for the same session (mount + SSE settle +
-    // reconcile) share one request unless the caller forces a fresh read.
+    // reconcile) share one request. A forced read is keyed apart so it never
+    // absorbs a plain one, and is registered too, so a second forced caller
+    // shares the fresh read already in the air instead of starting a duplicate.
     const flightKey = options?.force ? `force:${sid}` : sid;
-    const inflight = options?.force ? undefined : loadFlightsRef.current.get(flightKey);
+    const inflight = loadFlightsRef.current.get(flightKey);
     if (inflight) return await inflight;
   const flight = (async (): Promise<unknown> => {
     let messagesLoaded = false;
@@ -836,12 +857,13 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       if (showLoading && !messagesLoaded) setLoading(false);
     }
     })();
-    if (!options?.force) loadFlightsRef.current.set(flightKey, flight);
+    loadFlightsRef.current.set(flightKey, flight);
     flight.finally(() => {
       if (loadFlightsRef.current.get(flightKey) === flight) loadFlightsRef.current.delete(flightKey);
     });
     return await flight;
   }, [setToolPresetState, syncLiveModel]);
+  loadSessionRef.current = loadSession;
 
   const loadContext = useCallback(async (sid: string, leafId: string | null, before?: string | null, options?: { tail?: number; signal?: AbortSignal }) => {
     try {

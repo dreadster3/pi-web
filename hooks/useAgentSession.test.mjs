@@ -187,7 +187,7 @@ test("sessions the user never overrode follow pi's configured defaultTools (#700
   );
 });
 
-test("only the session-mount load probes disk for external appends", () => {
+test("only the mount and a live run's poll force a disk probe for external appends", () => {
   const loadSessionSource = source.slice(
     source.indexOf("  const loadSession = useCallback"),
     source.indexOf("  const loadContext = useCallback"),
@@ -201,7 +201,12 @@ test("only the session-mount load probes disk for external appends", () => {
   assert.match(loadSessionSource, /d\.wrapperRebuilt[\s\S]*?eventConnectionRef\.current\?\.close\(\)[\s\S]*?maintain\(sid\)/);
   assert.match(mountSource, /loadSession\(session\.id, !cached, true, \{ force: true \}\)/);
   assert.match(source, /await loadSession\(sid\)/);
-  assert.equal([...source.matchAll(/\{ force: true \}/g)].length, 1);
+  // A forced read is keyed apart from the plain one and is single-flighted too,
+  // so the mount's read and a live run's poll share one fresh request instead of
+  // racing two. The only two force callers are the mount and that poll.
+  assert.match(loadSessionSource, /const inflight = loadFlightsRef\.current\.get\(flightKey\)/);
+  assert.match(loadSessionSource, /loadFlightsRef\.current\.set\(flightKey, flight\)/);
+  assert.equal([...source.matchAll(/\{ force: true \}/g)].length, 2);
 });
 
 test("forking stays available during a run while in-session branch switches wait for it", () => {

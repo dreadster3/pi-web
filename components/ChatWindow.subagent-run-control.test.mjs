@@ -24,6 +24,40 @@ function renderComposer(props) {
   );
 }
 
+test("a live run's poll re-reads the child transcript, a terminal one does not", () => {
+  const controlSource = hookSource.slice(
+    hookSource.indexOf("── pi-subagents run control"),
+    hookSource.indexOf("const executeBash = useCallback"),
+  );
+  const pollSource = controlSource.slice(
+    controlSource.indexOf("const poll = async () =>"),
+    controlSource.indexOf("const onVisibilityChange"),
+  );
+  // The detached runner appends to the child's `.jsonl` from another process
+  // while this chat's own wrapper stays alive, so only a forced read reaches that
+  // progress — inside the successful read, on the run's own state.
+  assert.match(
+    pollSource,
+    /setSteerReceipts\(result\.data\.steering\)[\s\S]*?if \(piSubagentRunLive\(result\.data\.state\)\) \{[\s\S]*?loadSessionRef\.current\?\.\(sid, false, false, \{ force: true \}\)/,
+  );
+  // It re-reads the open child, never some other id, and only when no forced read
+  // for that session is already in the air: the mount's own read and this poll's
+  // share one fresh request, so one cycle can never start a second fetch of the
+  // same transcript.
+  assert.match(
+    pollSource,
+    /const sid = sessionIdRef\.current;\s*\n\s*if \(sid && !loadFlightsRef\.current\.has\(`force:\$\{sid\}`\)\) \{\s*\n\s*void loadSessionRef\.current\?\.\(sid, false, false, \{ force: true \}\)/,
+  );
+  // A run that is unknown, gone or terminal leaves the transcript alone: only
+  // the 404/400 arm touches the gate, and nothing outside `result.ok` reloads.
+  assert.doesNotMatch(pollSource, /else if \(result\.status === 404[\s\S]*?loadSessionRef/);
+  // The same load the SSE settlement uses, reached through the ref that is
+  // assigned from it after its definition — one single-flighted read, and the
+  // same entry ids and tree state every other refresh path settles.
+  assert.match(hookSource, /loadSessionRef\.current = loadSession;/);
+  assert.match(hookSource, /piSubagentRunLive,/);
+});
+
 test("the child chat polls the run's own status and seeds from the sidebar row", () => {
   const controlSource = hookSource.slice(
     hookSource.indexOf("── pi-subagents run control"),
