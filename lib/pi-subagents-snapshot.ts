@@ -1,6 +1,5 @@
 // Pure helpers for pi-subagents' live async-status widget. Kept free of Node
-// built-ins so the demo (a static, backend-free build) can mirror this file and
-// the progress UI can share it across server and browser.
+// built-ins so the progress UI can share it across server and browser.
 
 export const PI_SUBAGENTS_ASYNC_WIDGET_PREFIX = "PI_SUBAGENT_ASYNC_JSON:";
 export const PI_SUBAGENTS_ASYNC_SNAPSHOT_KIND = "pi-subagents.async-status-snapshot";

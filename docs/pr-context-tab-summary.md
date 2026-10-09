@@ -4,7 +4,7 @@
 
 - **Branch**: `feat/settings-context-tab` (based on `origin/chore/sync-upstream-4`)
 - **PR**: https://github.com/dreadster3/pi-web/pull/21 — base `chore/sync-upstream-4`, **stacked on #20**; retarget to `main` once #20 merges. Nothing merged.
-- **Commits**: 2 (`feat(settings):` + `chore(demo):`)
+- **Commits**: 1 (`feat(settings):`)
 
 ## How each of the 7 entries is exposed
 
@@ -82,14 +82,6 @@ actually finds, which is how "look for CLAUDE.md as well" is surfaced.
   `ContextFileProblem`/`ContextPathProblem`, `ContextFileInfo`, `ContextResponse`,
   `ContextWriteTarget`), `app/settings.css` (`.context-*`), `lib/i18n/messages/{en,zh-CN,zh-TW}.ts`
 
-**Demo mirror (commit `d6b7d9f`)**
-- Added: `demo/components/ContextConfig.tsx`, `demo/components/context-config-helpers.ts`,
-  `demo/mock/data/context.ts`
-- Changed: `demo/components/SettingsPanel.tsx`, `demo/components/SettingsUi.tsx` (gains
-  `ConfigNotice`, `ConfigDetailGrid`, `ConfigDetailGridRow`, `ConfigScopeTag`),
-  `demo/lib/settings-navigation.ts`, `demo/lib/api-types.ts`, `demo/app/settings.css`,
-  `demo/lib/i18n/messages/{en,zh-CN,zh-TW}.ts`, `demo/mock/settings-routes.ts`, `demo/README.md`
-
 ## Validation
 
 Gate (as briefed): `npx tsc --noEmit`, `npm run lint`, `env -u PI_WEB_IDLE_TIMEOUT_MS npm test`,
@@ -105,9 +97,6 @@ each wrapped in `timeout`.
 | `components/SettingsPanel.test.mjs`, `lib/settings-navigation.test.mjs` | 25/25 pass |
 | `app/api/context/route.test.mjs` | 18/18 pass (path resolution, `PI_CODING_AGENT_DIR`, the fallback chain, both precedence rules, create/write, delete of an agent-directory entry, a project `.pi` entry, a project `AGENTS.md` and the override, an already-gone file, traversal and symlink-out refusals for read, write and remove, `cwd` refusals, size cap, origin/content-type guards) |
 | `components/ContextConfig.test.mjs` | 15/15 pass (all seven entries, no-project disabled state, precedence text, file problems, truncation, deadlines, request shapes, class/CSS back-and-forth, the per-entry Delete affordance and consequence text, refusal surfacing, all three locales) |
-| demo `tsc --noEmit` | clean |
-| demo eslint | clean |
-| demo `next build` | **fails identically on the pristine base** (Turbopack `leaves the filesystem root`; worktree layout with a linked dependency folder). Gate not exercisable in this worktree. |
 
 Delta from base: **+25 tests, +25 passes, +0 failures.** My change broke nothing.
 
@@ -118,8 +107,4 @@ Delta from base: **+25 tests, +25 passes, +0 failures.** My change broke nothing
 
 ## Open items / risks
 
-- The demo build gate could not run here (pre-existing host/worktree layout issue). CI's
-  `demo-pages.yml` builds it on `main` push.
-- `demo/next build` also writes `demo/public/demo-files/` (gitignored) and a `tsconfig.tsbuildinfo`
-  (gitignored); both were left untracked.
 - PR #21 must be retargeted from `chore/sync-upstream-4` to `main` after #20 merges.

@@ -1,7 +1,7 @@
 // Client side of the pi-subagents run bridge (docs/adr/0007-subagents-control-bridging.md).
 // A child transcript's chat is the control surface: its Send steers the run, its
 // Stop hard-stops it and its Pause interrupts it. Client-safe — types and fetch
-// only, no node builtins — so the demo mirrors this file.
+// only, no node builtins.
 import type { PiSubagentRunState } from "./pi-subagents-snapshot";
 
 /** The run states whose progress still changes, i.e. where Send means something. */
