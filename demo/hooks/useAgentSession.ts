@@ -35,6 +35,7 @@ import {
   piSubagentRunControlNotice,
   piSubagentRunPausable,
   piSubagentRunSteerable,
+  piSubagentRunLive,
   piSubagentSteerDelivery,
   sendPiSubagentRunControl,
   type PiSubagentPendingSteer,
@@ -406,6 +407,9 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const liveFollowFrameRef = useRef<number | null>(null);
   const executeBashRef = useRef<(command: string, excludeFromContext: boolean) => Promise<void> | undefined>(undefined);
   const handleNavigateRef = useRef<((entryId: string) => Promise<boolean>) | undefined>(undefined);
+  // The run poll below runs before loadSession is defined; it re-reads a live
+  // child transcript through this late-assigned ref, like executeBashRef.
+  const loadSessionRef = useRef<((sid: string, showLoading?: boolean, includeState?: boolean, options?: { force?: boolean }) => Promise<unknown>) | undefined>(undefined);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const ensuringNewSessionRef = useRef<Promise<string | null> | null>(null);
   const newSessionPromotedRef = useRef(false);
@@ -591,6 +595,22 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         if (result.ok) {
           setRunState({ runId: controlledRunId, state: result.data.state });
           setSteerReceipts(result.data.steering);
+          // The detached runner writes the child's `.jsonl` directly, so this
+          // chat's SSE (its own idle wrapper) never sees the run's progress: a
+          // live run's transcript advances only by re-reading it. Every poll
+          // cycle therefore re-reads through the same single-flighted load the
+          // SSE settlement uses, so entry ids and tree state stay consistent
+          // with reconciliation and branch navigation: a same-session read in
+          // the air absorbs the call, and one already forcing a fresh read (the
+          // mount's own) is at least as fresh as this cycle's. A terminal or
+          // unknown run leaves the transcript where it is.
+          if (piSubagentRunLive(result.data.state)) {
+            const sid = sessionIdRef.current;
+            const flights = loadFlightsRef.current;
+            if (sid && !flights.has(sid) && !flights.has(`force:${sid}`)) {
+              void loadSessionRef.current?.(sid);
+            }
+          }
         } else if (result.status === 404 || result.status === 400) {
           // A run that is gone or unaddressable will not come back at the same
           // id, so stop the poll and clear the gate: the composer falls back to a
@@ -842,6 +862,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     });
     return await flight;
   }, [setToolPresetState, syncLiveModel]);
+  loadSessionRef.current = loadSession;
 
   const loadContext = useCallback(async (sid: string, leafId: string | null, before?: string | null, options?: { tail?: number; signal?: AbortSignal }) => {
     try {
