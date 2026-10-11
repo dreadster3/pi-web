@@ -150,6 +150,37 @@ test("what stays is re-pointed at its nearest ancestor left, or loses a parent n
   assert.equal(subRest.length, 2, "the rest of the file is kept");
 });
 
+test("a deleted session takes the pi-subagents child tree kept beside its own file with it", async (t) => {
+  const { sessionsDir, ids } = await scratchAgentDir(t);
+  const cwd = "/work/alpha";
+  const parent = await writeSession(sessionsDir, "parent", { id: "del-parent", cwd });
+  const sibling = await writeSession(sessionsDir, "sibling", { id: "keep-sibling", cwd });
+  ids.push("del-parent", "keep-sibling", "del-child");
+  // A pi-subagents child tree under `<projectDir>/<parentBase>/`: the parent's
+  // own session file without `.jsonl` names the directory its children live in.
+  // A foreground child carries no `pi-web:subagent` metadata, so this tree is
+  // the only place on disk it exists.
+  const childRoot = join(sessionsDir, "parent");
+  const childDir = join(childRoot, "child-uuid");
+  const childRun = join(childDir, "run-0");
+  await mkdir(childRun, { recursive: true });
+  await writeFile(join(childRun, "session.jsonl"), `${JSON.stringify({ type: "session", version: 3, id: "del-child", timestamp: TIME, cwd })}\n`);
+
+  const response = await post({ ids: ["del-parent"] });
+
+  assert.equal(response.status, 200);
+  const result = await response.json();
+  // The nested child is a catalogue session too (the layout is its relation),
+  // so it is reported with the parent it went under.
+  assert.deepEqual(result.deleted.toSorted(), ["del-child", "del-parent"]);
+  assert.equal(existsSync(parent), false, "the parent's session file is gone");
+  assert.equal(existsSync(childRoot), false, "the child tree under it is gone");
+  // Both directories the child left empty are pruned with it.
+  assert.equal(existsSync(childRun), false, "the emptied run directory is pruned");
+  assert.equal(existsSync(childDir), false, "the child's own directory is pruned");
+  assert.equal(existsSync(sibling), true, "a sibling session of the same project directory stays");
+});
+
 test("a delete request must be a trusted JSON list of session ids, at most one part", async (t) => {
   await scratchAgentDir(t);
   assert.equal(MAX_SESSION_DELETE_IDS, PROJECT_DELETE_IDS_PER_REQUEST, "the sidebar's parts fit the route");
