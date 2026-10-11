@@ -1,5 +1,45 @@
 # Changelog
 
+## [0.3.0](https://github.com/dreadster3/pi-web/compare/v0.2.0...v0.3.0) (2026-10-11)
+
+
+### Features
+
+* **cli:** add version, update, status, stop and open commands ([#1139](https://github.com/dreadster3/pi-web/issues/1139)) ([#1154](https://github.com/dreadster3/pi-web/issues/1154)) ([f98c088](https://github.com/dreadster3/pi-web/commit/f98c088165582c11b6a9907b875ed7a54766aafd))
+* **files:** preview HTML files larger than one 256 KB chunk ([#1155](https://github.com/dreadster3/pi-web/issues/1155)) ([93b3aba](https://github.com/dreadster3/pi-web/commit/93b3aba53d3c2fb4b4cf931fb898c55a94c3f808))
+* **new-session:** brand above, project and worktree right over the composer ([e2fe4fb](https://github.com/dreadster3/pi-web/commit/e2fe4fb84264caeec799ea8f4d15fd2e9bde3793))
+* **sessions:** open sidebar sessions in a new browser tab ([#1169](https://github.com/dreadster3/pi-web/issues/1169)) ([d9adb38](https://github.com/dreadster3/pi-web/commit/d9adb38627fa3191fbbad2956942cc783947d480))
+* **sidebar:** delete all sessions of a project from its menu ([#1182](https://github.com/dreadster3/pi-web/issues/1182)) ([c8182b1](https://github.com/dreadster3/pi-web/commit/c8182b1835ac88f535d5cf31d94d0f8431cdf4cb))
+* **sidebar:** files below the sessions on desktop, section-style project headers ([3fe257f](https://github.com/dreadster3/pi-web/commit/3fe257f231a893e4d046ac187e8cb7f237afee5e))
+* **sidebar:** folding a group drops its "show more" window ([0066d5f](https://github.com/dreadster3/pi-web/commit/0066d5f98f2df890738fcf1b43d81c188b073386))
+* **skills:** render full instructions in settings ([#1158](https://github.com/dreadster3/pi-web/issues/1158)) ([ae34240](https://github.com/dreadster3/pi-web/commit/ae34240e6673c3d817fee444223a78f5e4a16e2b))
+* **subagents:** connect mcp.json servers with a profile's mcp: on ([#1053](https://github.com/dreadster3/pi-web/issues/1053)) ([#1187](https://github.com/dreadster3/pi-web/issues/1187)) ([68f04ef](https://github.com/dreadster3/pi-web/commit/68f04ef3c931da1ffefb529fa2a61b282e31df3e))
+* **subagents:** read pi's model:level suffix for a run's thinking ([#1188](https://github.com/dreadster3/pi-web/issues/1188)) ([#1189](https://github.com/dreadster3/pi-web/issues/1189)) ([445b58c](https://github.com/dreadster3/pi-web/commit/445b58cd5200fe3f07c056a3f7d0449d1ec03ba8))
+* **terminal:** add Termux-style extra keys on portrait touch screens ([#1166](https://github.com/dreadster3/pi-web/issues/1166)) ([6835326](https://github.com/dreadster3/pi-web/commit/6835326558cc17d298d514c7904656e6e65ceb6c))
+
+
+### Bug Fixes
+
+* **audio:** keep the chime's context running during a run ([#1157](https://github.com/dreadster3/pi-web/issues/1157)) ([#1185](https://github.com/dreadster3/pi-web/issues/1185)) ([d1529d0](https://github.com/dreadster3/pi-web/commit/d1529d04ce5daf2c9d2fb04f70535c693231a833))
+* **audio:** suspend the completion-sound context while idle ([#1157](https://github.com/dreadster3/pi-web/issues/1157)) ([#1178](https://github.com/dreadster3/pi-web/issues/1178)) ([7a416ce](https://github.com/dreadster3/pi-web/commit/7a416ce8347513a03a40dae4e151d5841dbb81ce))
+* **cli:** exit when the event loop drains after the server probe ([#1174](https://github.com/dreadster3/pi-web/issues/1174)) ([#1179](https://github.com/dreadster3/pi-web/issues/1179)) ([5abdee3](https://github.com/dreadster3/pi-web/commit/5abdee35e5fbe1248197e46a6ed60498968cbb06))
+* **mcp:** say each fact once in a server's detail pane ([#1190](https://github.com/dreadster3/pi-web/issues/1190)) ([e8b0236](https://github.com/dreadster3/pi-web/commit/e8b0236bac1da4aedf43005c42ab2ba522610b94))
+* **sessions:** a link to a gone session shows no other session ([#1168](https://github.com/dreadster3/pi-web/issues/1168)) ([#1180](https://github.com/dreadster3/pi-web/issues/1180)) ([e83280e](https://github.com/dreadster3/pi-web/commit/e83280ed32d01f92386dae477b6d05ff1ae0ec09))
+* **sessions:** classify nested subagent children by layout ([#77](https://github.com/dreadster3/pi-web/issues/77)) ([c21ec05](https://github.com/dreadster3/pi-web/commit/c21ec05a2bd0020037586d3bac24288ac1fcb7d2))
+* **sessions:** guard the remaining in-flight-turn invalidation paths ([#1173](https://github.com/dreadster3/pi-web/issues/1173)) ([e493310](https://github.com/dreadster3/pi-web/commit/e493310202bf9672081c8ba228b1a198131321d1))
+* **sidebar:** selecting a revealed session no longer shows an older one ([51dda7c](https://github.com/dreadster3/pi-web/commit/51dda7c50402c30db484d0a4e78eb0ac675fb0a8))
+* **sync:** drop the demo mirror file that re-entered the merge ([031537d](https://github.com/dreadster3/pi-web/commit/031537d6eb95018e262c8c529243b290c166128c))
+* **terminal:** keep input alive when the phone keyboard collapses the panel ([#1160](https://github.com/dreadster3/pi-web/issues/1160)) ([3ff7e1d](https://github.com/dreadster3/pi-web/commit/3ff7e1d707c694bf7bbd9bcbc79331190e2f0061))
+
+
+### Performance Improvements
+
+* **chat:** load Prism languages on demand ([#1183](https://github.com/dreadster3/pi-web/issues/1183)) ([046bc67](https://github.com/dreadster3/pi-web/commit/046bc67ebbc9eadc3ff5d36fcea9f479ee920edc))
+* **chat:** re-render only the streaming reply per chunk ([#1191](https://github.com/dreadster3/pi-web/issues/1191)) ([e8d91ef](https://github.com/dreadster3/pi-web/commit/e8d91efdcedf2a37a2ca0a31c2a6df9c30a4eb93))
+* image caching, subagent relation cache, view-cache sizing, deferred code highlighting ([#1181](https://github.com/dreadster3/pi-web/issues/1181)) ([b2b6a45](https://github.com/dreadster3/pi-web/commit/b2b6a45b8f7e8f745b5016e18380c5f58b2ccdf0))
+* **sessions:** rebuild the list once per finished run ([#1177](https://github.com/dreadster3/pi-web/issues/1177)) ([b73fdeb](https://github.com/dreadster3/pi-web/commit/b73fdebc683be46daa2b0275af4684d130b46f02))
+* streaming markdown, session list payload, push title, SSE image echo ([#1176](https://github.com/dreadster3/pi-web/issues/1176)) ([a952ed5](https://github.com/dreadster3/pi-web/commit/a952ed507ea548df5536ac35a0e8eae8addf50d9))
+
 ## [0.2.0](https://github.com/dreadster3/pi-web/compare/v0.1.0...v0.2.0) (2026-10-09)
 
 
