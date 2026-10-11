@@ -18,7 +18,7 @@ test("expands process details when a completed turn has no final answer", () => 
   assert.match(source, /const \[expanded, setExpanded\] = useState\(defaultExpanded\)/);
   assert.match(
     source,
-    /<ProcessDetailsGroup[\s\S]*?defaultExpanded=\{!finalAnswerMessage\}/,
+    /<ProcessDetailsGroup[\s\S]*?defaultExpanded=\{!answered\}/,
   );
 });
 
@@ -27,6 +27,6 @@ test("resets process details when the turn gains or loses its final answer", () 
   // makes an answered turn start collapsed even if it first rendered unanswered.
   assert.match(
     source,
-    /<ProcessDetailsGroup key=\{finalAnswerMessage \? "answered" : "unanswered"\}[\s\S]*?defaultExpanded=\{!finalAnswerMessage\}/,
+    /<ProcessDetailsGroup key=\{answered \? "answered" : "unanswered"\}[\s\S]*?defaultExpanded=\{!answered\}/,
   );
 });

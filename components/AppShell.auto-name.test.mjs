@@ -20,5 +20,7 @@ test("尚未落盘的会话不会触发依赖 JSONL 的自动命名", () => {
 
 test("会话落盘后会用服务端记录清除临时状态", () => {
   assert.match(source, /\{ \.\.\.prev, \.\.\.full, transient: full\.transient \?\? false \}/);
-  assert.match(source, /if \(selectedSession\) hydrateSelectedSession\(selectedSession\.id\)/);
+  // The created session replaces the transient draft and is then hydrated from
+  // the list; the agent-end path no longer fetches on its own.
+  assert.match(source, /setSelectedSession\(session\);\s*hydrateSelectedSession\(session\.id\)/);
 });

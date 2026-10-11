@@ -151,6 +151,9 @@ export interface SubagentRunInfo {
 
 const DEFAULT_TOOLS = ["read", "bash", "edit", "write", "grep", "find", "ls"];
 const BUILTIN_TOOLS = new Set(DEFAULT_TOOLS);
+// `powershell` is platform-added by resolveShellTools and therefore is absent from
+// profile parsing's portable allow-list, but valid historical snapshots may contain it.
+const SNAPSHOT_BUILTIN_TOOLS = new Set([...BUILTIN_TOOLS, "powershell"]);
 const SUBAGENT_CONTROL_TOOLS = new Set<string>(SUBAGENT_CONTROL_TOOL_NAMES);
 const THINKING_LEVELS = new Set<ThinkingLevel>(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
 /** pi-subagents rejects a `toolTimeoutMs` above the 32-bit signed integer ceiling. */
@@ -777,7 +780,7 @@ export function readSubagentSessionResources(
       typeof item === "string"
       && item.length > 0
       && !SUBAGENT_CONTROL_TOOLS.has(item)
-      && (BUILTIN_TOOLS.has(item) || loadExtensions)
+      && (SNAPSHOT_BUILTIN_TOOLS.has(item) || loadExtensions)
     )
   ) {
     return {
