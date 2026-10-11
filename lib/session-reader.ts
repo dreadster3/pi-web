@@ -406,6 +406,9 @@ function mapScannedSession(
   cacheSessionPath(scanned.id, scanned.path);
   const { originSessionId, subagent } = resolveScannedSessionRelation(scanned, pathToId);
   const detailsPending = scanned.detailsPending === true;
+  // The nested pi-subagents layout wins over the generic `parentSession` fork
+  // header: pi-subagents 0.77.0 writes that header into child files too, and a
+  // child must still fold into its parent's family instead of becoming a row.
   const relation = subagent
     ? {
         kind: "subagent" as const,
@@ -414,9 +417,10 @@ function mapScannedSession(
         description: subagent.description,
         status: subagent.status,
       }
-    : scanned.parentSessionPath
-      ? { kind: "fork" as const, ...(originSessionId ? { originSessionId } : {}) }
-      : derivePiSubagentRelation(scanned, pathToId, context);
+    : derivePiSubagentRelation(scanned, pathToId, context)
+      ?? (scanned.parentSessionPath
+        ? { kind: "fork" as const, ...(originSessionId ? { originSessionId } : {}) }
+        : undefined);
   return {
     path: scanned.path,
     id: scanned.id,
