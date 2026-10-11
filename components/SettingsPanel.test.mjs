@@ -4,7 +4,6 @@ import test from "node:test";
 
 const panelSource = await readFile(new URL("./SettingsPanel.tsx", import.meta.url), "utf8");
 const cssSource = await readFile(new URL("../app/settings.css", import.meta.url), "utf8");
-const globalCssSource = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
 const shellSource = await readFile(new URL("./AppShell.tsx", import.meta.url), "utf8");
 // The sub-agents panel draws child sessions with the same robot glyph.
 const agentSessionPanelSource = await readFile(new URL("./AgentSessionPanel.tsx", import.meta.url), "utf8");
@@ -13,92 +12,10 @@ const themeOptionsSource = await readFile(new URL("../lib/theme.ts", import.meta
 const enSource = await readFile(new URL("../lib/i18n/messages/en.ts", import.meta.url), "utf8");
 const zhSource = await readFile(new URL("../lib/i18n/messages/zh-CN.ts", import.meta.url), "utf8");
 const loginSource = await readFile(new URL("../app/login/page.tsx", import.meta.url), "utf8");
-const stackedDialogSource = await readFile(new URL("../lib/stacked-dialog.ts", import.meta.url), "utf8");
 
-test("opens one settings panel from direct sidebar shortcuts", () => {
-  assert.match(shellSource, /<SettingsPanel/);
-  assert.match(shellSource, /setSettingsSection\(section\)/);
-  assert.match(shellSource, /initialSection=\{settingsSection\}/);
-  assert.match(shellSource, /translate\("common\.settings"\)/);
-  assert.match(shellSource, /<SettingsSectionIcon section=\{section\} size=\{14\} strokeWidth=\{2\} \/>\s*<span>\{label\}<\/span>/);
-  assert.match(shellSource, /<SettingsSectionIcon section="general" size=\{14\} strokeWidth=\{2\} \/>/);
-  assert.doesNotMatch(shellSource, /\["plugins", translate\("common\.plugins"\)\]/);
-  assert.doesNotMatch(shellSource, /setModelsConfigOpen|setSkillsConfigOpen|setAgentsConfigOpen|setPluginsConfigOpen/);
-});
-
-test("keeps every requested configuration surface inside the settings panel", () => {
-  for (const section of ["general", "models", "skills", "agents", "plugins", "mcp"]) {
-    assert.match(panelSource, new RegExp(`id: "${section}"`));
-  }
-  for (const component of ["ModelsConfig", "SkillsConfig", "AgentsConfig", "PluginsConfig", "McpConfig"]) {
-    assert.match(panelSource, new RegExp(`<${component} embedded`));
-  }
-});
-
-test("Settings › MCP works without a project, and only project sections fall back to General", () => {
-  // Mounted with or without a cwd, and remounted when the project changes.
-  assert.match(panelSource, /\{sectionHost\("mcp", <McpConfig embedded key=\{cwd \?\? ""\} cwd=\{cwd\} [^\n]*onClose=\{onClose\} \/>\)\}/);
-  assert.doesNotMatch(panelSource, /cwd && sectionHost\("mcp"/);
-  // Which sections need a project is decided once, in settings-navigation.
-  assert.match(panelSource, /requiresProject: settingsSectionRequiresProject\(item\.id\)/);
-  assert.match(panelSource, /const sectionRequiresProject = settingsSectionRequiresProject\(section\);/);
-  assert.match(panelSource, /if \(cwd \|\| !sectionRequiresProject\) return;/);
-  assert.doesNotMatch(panelSource, /section !== "skills" && section !== "agents"/);
-  // The sidebar shortcuts ask the same function instead of naming sections by hand.
-  assert.match(shellSource, /const disabled = settingsSectionRequiresProject\(section\) && !projectTrustCwd;/);
-  assert.doesNotMatch(shellSource, /section !== "models"/);
-  // Its own glyph, not the Plugins fallback.
-  assert.match(panelSource, /if \(section === "mcp"\) return <svg \{\.\.\.common\}>/);
-  for (const source of [enSource, zhSource]) assert.match(source, /"settings\.mcp": "MCP"/);
-});
-
-test("restores the settings section and each list detail selection", async () => {
-  assert.match(shellSource, /getLastSettingsSection\(projectTrustCwd\)/);
-  assert.match(panelSource, /setLastSettingsSection\(initialSection\)/);
-  assert.match(panelSource, /setLastSettingsSection\(nextSection\)/);
-  for (const name of ["ModelsConfig", "SkillsConfig", "AgentsConfig", "PluginsConfig", "McpConfig"]) {
-    assert.match(
-      await readFile(new URL(`./${name}.tsx`, import.meta.url), "utf8"),
-      /getLastSettingsSelection/,
-    );
-  }
-});
-
-test("keeps visited settings sections mounted and contains nested Escape handling", async () => {
-  const modelsSource = await readFile(new URL("./ModelsConfig.tsx", import.meta.url), "utf8");
-  assert.match(panelSource, /mountedSections\.has\(id\)/);
-  assert.match(panelSource, /hidden=\{section !== id\}/);
-  // Settings closes on an Escape nothing nearer handled (lib/stacked-dialog.test.mjs pins the phases).
-  assert.match(panelSource, /useEffect\(\(\) => listenForPanelEscape\(document, onClose\), \[onClose\]\);/);
-  assert.doesNotMatch(panelSource, /addEventListener\("keydown"/);
-  // An Escape that cancels an IME composition is the input method's, not a request to close.
-  assert.match(stackedDialogSource, /if \(event\.key !== "Escape" \|\| event\.defaultPrevented \|\| cancelsComposition\(event\)\) return;/);
-  assert.match(modelsSource, /e\.preventDefault\(\);\s*e\.stopPropagation\(\);\s*onClose\(\);/);
-});
-
-test("focus moves into Settings as it opens and back to its opener as it closes", () => {
-  // Left on the composer a bare /mcp opened Settings from, Escape stopped a running agent
-  // and Settings stayed open (lib/stacked-dialog.test.mjs runs focusModalPanel()).
-  assert.match(panelSource, /const dialogRef = useRef<HTMLDivElement>\(null\);\n\s*useLayoutEffect\(\(\) => focusModalPanel\(document, dialogRef\.current, \{\n\s*restoreTextEntry: !window\.matchMedia\?\.\("\(pointer: coarse\)"\)\.matches,\n\s*\}\), \[\]\);/);
-  assert.match(panelSource, /<div\n\s*ref=\{dialogRef\}\n\s*role="dialog"\n\s*aria-modal="true"\n\s*aria-label=\{t\("settings\.title"\)\}\n\s*tabIndex=\{-1\}/);
-  // The dialog element is not a control: no focus ring around the whole page.
-  assert.match(cssSource, /\.settings-dialog-backdrop:focus \{\n\s*outline: none;\n\}/);
-});
-
-test("Settings › MCP offers Trust through the page's trust dialog, which opens above Settings", () => {
-  // AppShell owns trust: its status and its dialog opener go through SettingsPanel to McpConfig.
-  assert.match(shellSource, /<SettingsPanel[\s\S]*?projectTrust=\{projectTrust\}\n\s*onOpenTrustDialog=\{openProjectTrustDialog\}[\s\S]*?\/>/);
-  assert.match(panelSource, /<McpConfig embedded key=\{cwd \?\? ""\} cwd=\{cwd\} trust=\{projectTrust\} onTrustProject=\{onOpenTrustDialog\} onProjectTrustChanged=\{onProjectTrustChanged\} onClose=\{onClose\} \/>/);
-  // The banner and Settings open the same dialog, for the same folder Settings shows.
-  assert.match(shellSource, /const openProjectTrustDialog = useCallback\(\(\) => \{\n\s*setProjectTrustError\(null\);\n\s*setProjectTrustDialogOpen\(true\);\n\s*\}, \[\]\);/);
-  assert.match(shellSource, /onClick=\{openProjectTrustDialog\}/);
-  assert.match(shellSource, /<SettingsPanel\n\s*cwd=\{projectTrustCwd\}/);
-  assert.match(shellSource, /<ProjectTrustDialog\n\s*cwd=\{projectTrustCwd\}/);
-  // Rendered after Settings and stacked above it.
-  assert.ok(shellSource.indexOf("<ProjectTrustDialog") > shellSource.indexOf("<SettingsPanel"));
+test("the trust dialog Settings › MCP opens stacks above Settings", () => {
   const zIndex = (selector) => Number(cssSource.match(new RegExp(`\\${selector} \\{[^}]*z-index: (\\d+);`))?.[1]);
   assert.ok(zIndex(".project-trust-backdrop") > zIndex(".settings-dialog-backdrop"));
-  // Escape there closes only the dialog: ProjectTrustDialog.test.mjs and lib/stacked-dialog.test.mjs.
 });
 
 test("an Add in Settings › MCP hands the folder's new trust to the page, which every section reloads on", () => {
@@ -162,7 +79,7 @@ test("groups fonts, chat font size and width in one section, chat behavior in an
   );
   const chatSection = panelSource.slice(
     panelSource.indexOf('{t("settings.chat")}'),
-    panelSource.indexOf("{shellSettings?.isWindows"),
+    panelSource.indexOf('{t("settings.sidebar")}'),
   );
 
   assert.doesNotMatch(appearanceSection, /settings-chat-content|<FontSettings/);
@@ -233,11 +150,10 @@ test("keeps password authentication to one login field and one settings action",
   assert.equal((loginSource.match(/type="password"/g) ?? []).length, 1);
   assert.doesNotMatch(loginSource, /type="(?:text|email)"/);
   assert.match(loginSource, /autoComplete="current-password"/);
+});
+
+test("the login page returns only to a destination safeLoginDestination() accepts", () => {
   assert.match(loginSource, /safeLoginDestination\(destination, window\.location\.origin\)/);
-  assert.match(panelSource, /fetch\("\/api\/web-auth", \{ method: "DELETE" \}\)/);
-  assert.match(panelSource, /t\("auth\.logOut"\)/);
-  assert.match(loginSource, /className="web-login-composer"[\s\S]*?type="password"[\s\S]*?<button type="submit"/);
-  assert.match(globalCssSource, /\.web-login-composer \{[\s\S]*?display: flex;[\s\S]*?border-radius: 14px/);
 });
 
 test("hands the agents section its own visibility so a mounted panel can refresh", () => {

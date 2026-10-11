@@ -149,6 +149,8 @@ git tag --sort=-v:refname | head -1   # the latest release tag
 
 ## Verifying a release
 
+Patch release:
+
 ```bash
 npm view @dreadster3/pi-web version
 npm view @dreadster3/pi-web@<version> dist.attestations   # provenance
