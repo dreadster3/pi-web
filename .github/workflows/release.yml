@@ -115,7 +115,7 @@ jobs:
       # Node 24 for trusted publishing; staged publishing also needs Node >= 22.14.
       # package-manager-cache: false — no cache for a job holding an OIDC publish
       # token (supply-chain hardening; the input exists from setup-node v5 on).
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
           package-manager-cache: false
