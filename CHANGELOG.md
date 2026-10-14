@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/dreadster3/pi-web/compare/v0.3.0...v0.4.0) (2026-10-14)
+
+
+### Miscellaneous Chores
+
+* sync upstream ([b80e9cf](https://github.com/dreadster3/pi-web/commit/b80e9cf392b94f3e07d3c8884677388d9ac6978c))
+
 ## [0.3.0](https://github.com/dreadster3/pi-web/compare/v0.2.0...v0.3.0) (2026-10-11)
 
 
