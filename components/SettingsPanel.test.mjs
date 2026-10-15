@@ -53,7 +53,7 @@ test("trusting from Settings › MCP reloads, in place, the other mounted sectio
 });
 
 test("offers every palette and system theme selection with native radios", () => {
-  for (const preference of ["auto", "light", "mist", "lilac", "sand", "rose", "dark", "pine", "dusk", "ember", "slate", "contrast-light", "contrast-dark", "zenburn"]) {
+  for (const preference of ["auto", "light", "mist", "lilac", "sand", "latte", "rose", "dark", "pine", "dusk", "ember", "mocha", "slate", "contrast-light", "contrast-dark", "zenburn"]) {
     assert.match(themeOptionsSource, new RegExp(`id: "${preference}"`));
   }
   assert.match(panelSource, /THEME_OPTIONS\.map/);
