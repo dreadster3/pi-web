@@ -1,5 +1,52 @@
 # Changelog
 
+## [0.5.0](https://github.com/dreadster3/pi-web/compare/v0.4.0...v0.5.0) (2026-10-16)
+
+
+### Features
+
+* **chat:** show how long each turn took, and the running turn's elapsed time ([#1222](https://github.com/dreadster3/pi-web/issues/1222)) ([49fa89c](https://github.com/dreadster3/pi-web/commit/49fa89c92eca32b4777f1c3aa44792b0f3a53a67))
+* **chat:** show pi's cache and cost notices ([#1265](https://github.com/dreadster3/pi-web/issues/1265)) ([#1267](https://github.com/dreadster3/pi-web/issues/1267)) ([653cd7c](https://github.com/dreadster3/pi-web/commit/653cd7c060ca6a7da2742bfddb527b62e094382c))
+* edit managed-model context windows in Settings ([#1221](https://github.com/dreadster3/pi-web/issues/1221)) ([0e78bbe](https://github.com/dreadster3/pi-web/commit/0e78bbea260c46299c48c6e4e1176ffa24f95a36))
+* **files:** drag-and-drop upload with precise subdirectory targets ([#1192](https://github.com/dreadster3/pi-web/issues/1192)) ([5ec5a74](https://github.com/dreadster3/pi-web/commit/5ec5a745f2ce1fd3eb5ffe7d40721df1c4427311))
+* **files:** highlight more file types in the source view ([#1197](https://github.com/dreadster3/pi-web/issues/1197)) ([#1243](https://github.com/dreadster3/pi-web/issues/1243)) ([898eb5a](https://github.com/dreadster3/pi-web/commit/898eb5ae6b69b0156ee666be261d8c6e443c579a))
+* **sidebar:** open projects in a new browser tab ([#1208](https://github.com/dreadster3/pi-web/issues/1208)) ([5e286a9](https://github.com/dreadster3/pi-web/commit/5e286a9459604979004bf8524a4432b8c0e79881))
+* **terminal:** switch the terminal between dark and light ([#1268](https://github.com/dreadster3/pi-web/issues/1268)) ([#1270](https://github.com/dreadster3/pi-web/issues/1270)) ([520ce8d](https://github.com/dreadster3/pi-web/commit/520ce8d52718f4411ad7b1495154c85166869709))
+* **ui:** fade scrolled edges and smooth dark-theme text ([e070e0b](https://github.com/dreadster3/pi-web/commit/e070e0b7322fc59db6ab97f3b69ce7dca83e1337))
+* **ui:** fold the archive's projects and act on them in bulk ([49c9ca8](https://github.com/dreadster3/pi-web/commit/49c9ca84b55b1f9951129337054f3afa0852a9d8))
+* **ui:** more themes, picked by swatch ([#1269](https://github.com/dreadster3/pi-web/issues/1269)) ([d749fad](https://github.com/dreadster3/pi-web/commit/d749fadfaf5f9140f12fb42a7d83c2ba07f6920c))
+* **ui:** show each agent's time, tokens and cost in the agent switcher ([972b02d](https://github.com/dreadster3/pi-web/commit/972b02ddc0a576ad7aab8c9074685266061445a8))
+* **ui:** simplify the process fold summary and the project menu ([56f71d9](https://github.com/dreadster3/pi-web/commit/56f71d993f26b5ec43b054471a6a31a301d1f7e8))
+* **ui:** toggle a subagent's side-panel tab from the agent switcher ([4b529b4](https://github.com/dreadster3/pi-web/commit/4b529b4d492a3b5441dc82899a16f2ce03f39c3c))
+
+
+### Bug Fixes
+
+* **chat:** a run's messages keep their scroll and open state when the file is read ([#1184](https://github.com/dreadster3/pi-web/issues/1184)) ([0c67f55](https://github.com/dreadster3/pi-web/commit/0c67f5562d3a615971be1209a5a256e720ac5c0a))
+* **file-viewer:** keep the line-number gutter pinned and ease the code font ([#1200](https://github.com/dreadster3/pi-web/issues/1200)) ([c713fca](https://github.com/dreadster3/pi-web/commit/c713fcaaffd8044e7c88d6dbcfb7aa59680d6cc6))
+* **files:** find a changed file's own repository for its diff ([#1236](https://github.com/dreadster3/pi-web/issues/1236)) ([ac54e01](https://github.com/dreadster3/pi-web/commit/ac54e0153277d09a38ec1ef116a9f1f1c788765c))
+* **files:** stop overflowing panel tabs from being clipped ([#1225](https://github.com/dreadster3/pi-web/issues/1225)) ([#1242](https://github.com/dreadster3/pi-web/issues/1242)) ([bf0730c](https://github.com/dreadster3/pi-web/commit/bf0730c1548ae8e1c5aee2db3e47f14beeef10fd))
+* guard the sound and thinking preferences against blocked localStorage ([49678aa](https://github.com/dreadster3/pi-web/commit/49678aac77fb6950ab3e1701b09d81594d238667))
+* **http:** give connect attempts the CLI's two-second window ([#1261](https://github.com/dreadster3/pi-web/issues/1261)) ([8b9a084](https://github.com/dreadster3/pi-web/commit/8b9a084e523e8c3f73e0424a8c11265f7ea8f0e9))
+* **http:** keep proxied HTTP origins on CONNECT tunnels so httpIdleTimeoutMs applies ([7504578](https://github.com/dreadster3/pi-web/commit/75045783bd92a31ea5f6e76d4712f49f750badc5))
+* **models:** start a new session on a deferred default model ([#1240](https://github.com/dreadster3/pi-web/issues/1240)) ([#1262](https://github.com/dreadster3/pi-web/issues/1262)) ([eb135e5](https://github.com/dreadster3/pi-web/commit/eb135e5e260eb925dffdc46b81597de44a2a71ab))
+* **sessions:** show a session name an extension sets after its run ([#1237](https://github.com/dreadster3/pi-web/issues/1237)) ([#1246](https://github.com/dreadster3/pi-web/issues/1246)) ([9cfe265](https://github.com/dreadster3/pi-web/commit/9cfe2656c483ca425888a62624b51cf781b69237))
+* **skills:** open relative Markdown references in the detail pane ([#1234](https://github.com/dreadster3/pi-web/issues/1234)) ([f17a73a](https://github.com/dreadster3/pi-web/commit/f17a73abcd1421fc474112f8d0e0ba63fc40a680))
+* **subagents:** keep a settled run findable by the id it was given ([#1198](https://github.com/dreadster3/pi-web/issues/1198)) ([c5555cd](https://github.com/dreadster3/pi-web/commit/c5555cd82b4ceb77f1f36f888ce1de019116422b))
+* **subagents:** refuse resume in a removed worktree, and tell the parent where the worktree went ([#1202](https://github.com/dreadster3/pi-web/issues/1202)) ([32aa9f5](https://github.com/dreadster3/pi-web/commit/32aa9f58432b8ea6c535314db50f517b69a31ef6))
+* **subagents:** size input_files by the child model's context window ([#1199](https://github.com/dreadster3/pi-web/issues/1199)) ([27d4e4d](https://github.com/dreadster3/pi-web/commit/27d4e4d1c76cfa5497c0f819a25e3193e3d524d2))
+* **themes:** re-add latte and mocha themes ([50bf55c](https://github.com/dreadster3/pi-web/commit/50bf55c34c700091c2abe9605605a17f6b7af709))
+* **tools:** keep bash off when defaultTools leaves it out ([#1235](https://github.com/dreadster3/pi-web/issues/1235)) ([#1245](https://github.com/dreadster3/pi-web/issues/1245)) ([b8ef31e](https://github.com/dreadster3/pi-web/commit/b8ef31e66fd14635e32b0e4ec443c7301ca4c6cc))
+* **worktree:** focus the branch field when the create form swaps in over a filtered list ([#1203](https://github.com/dreadster3/pi-web/issues/1203)) ([84aa8d7](https://github.com/dreadster3/pi-web/commit/84aa8d73c3d128127fc82df187e858f1052a1c05))
+
+
+### Performance Improvements
+
+* **chat:** render long expanded thinking in pieces ([#1196](https://github.com/dreadster3/pi-web/issues/1196)) ([1037e0e](https://github.com/dreadster3/pi-web/commit/1037e0e8465501981f43fbbca4b0ac79b41146d1))
+* **sessions:** omit provider signatures from browser payloads ([#1193](https://github.com/dreadster3/pi-web/issues/1193)) ([8f3a71e](https://github.com/dreadster3/pi-web/commit/8f3a71e01a960107b6228bb9f1ac27b6eb033554))
+* **sessions:** rescan only the appended tail of a growing session file ([#1259](https://github.com/dreadster3/pi-web/issues/1259)) ([#1264](https://github.com/dreadster3/pi-web/issues/1264)) ([1a94341](https://github.com/dreadster3/pi-web/commit/1a94341cb2bdc9e152717f8514ccbc79171672f6))
+* **settings:** stop reloading every extension per provider and skills request ([#1226](https://github.com/dreadster3/pi-web/issues/1226)) ([b7fb403](https://github.com/dreadster3/pi-web/commit/b7fb40327c1c0bac8c946384e189f0109b595b6c))
+
 ## [0.4.0](https://github.com/dreadster3/pi-web/compare/v0.3.0...v0.4.0) (2026-10-14)
 
 
