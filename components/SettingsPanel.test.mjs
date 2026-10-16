@@ -52,8 +52,8 @@ test("trusting from Settings › MCP reloads, in place, the other mounted sectio
   assert.match(panelSource, /sectionHost\("models", <ModelsConfig embedded cwd=\{cwd\} onClose=\{onClose\} \/>\)/);
 });
 
-test("offers seven palettes and system theme selection with native radios", () => {
-  for (const preference of ["light", "dark", "mist", "rose", "pine", "latte", "mocha", "auto"]) {
+test("offers every palette and system theme selection with native radios", () => {
+  for (const preference of ["auto", "light", "mist", "lilac", "sand", "latte", "rose", "dark", "pine", "dusk", "ember", "mocha", "slate", "contrast-light", "contrast-dark", "zenburn"]) {
     assert.match(themeOptionsSource, new RegExp(`id: "${preference}"`));
   }
   assert.match(panelSource, /THEME_OPTIONS\.map/);
@@ -90,9 +90,9 @@ test("groups fonts, chat font size and width in one section, chat behavior in an
   }
   assert.match(chatSection, /className="settings-chat-options"/);
   assert.doesNotMatch(chatSection, /settings-chat-content/);
-  assert.equal((chatSection.match(/className="settings-chat-option(?: |")/g) ?? []).length, 3);
-  assert.equal((chatSection.match(/<ConfigSwitch/g) ?? []).length, 2);
-  for (const key of ["thinkingExpandedDefault", "quoteSelection", "enterSendMode", "enterSendModeEnter", "enterSendModeCtrlEnter"]) {
+  assert.equal((chatSection.match(/className="settings-chat-option(?: |")/g) ?? []).length, 4);
+  assert.equal((chatSection.match(/<ConfigSwitch/g) ?? []).length, 3);
+  for (const key of ["thinkingExpandedDefault", "quoteSelection", "enterSendMode", "enterSendModeEnter", "enterSendModeCtrlEnter", "cacheMissNotices"]) {
     assert.match(chatSection, new RegExp(`t\\("settings\\.${key}"\\)`));
   }
   assert.doesNotMatch(panelSource, /ThinkingIcon|settings-thinking-/);
